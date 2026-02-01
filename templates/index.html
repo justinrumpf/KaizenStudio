@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Background Remover</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Background Remover</h1>
+        <p class="subtitle">Remove backgrounds from e-commerce images using AI</p>
+
+        <!-- Upload Section -->
+        <div id="upload-section" class="section">
+            <!-- GoPro Preview Panel (shown when GoPro connected) -->
+            <div id="gopro-preview-section" class="gopro-preview-section hidden">
+                <div class="preview-header">
+                    <h3>GoPro Preview</h3>
+                    <div class="preview-controls">
+                        <select id="preview-interval">
+                            <option value="0">Manual</option>
+                            <option value="2">2s</option>
+                            <option value="5" selected>5s</option>
+                            <option value="10">10s</option>
+                        </select>
+                        <button id="preview-auto-btn" class="btn btn-sm btn-secondary">Auto</button>
+                        <button id="preview-refresh-btn" class="btn btn-sm btn-secondary">Refresh</button>
+                    </div>
+                </div>
+                <div class="preview-container">
+                    <div id="preview-placeholder" class="preview-placeholder">
+                        <svg class="camera-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="2" y="6" width="20" height="12" rx="2"/>
+                            <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                        <p>Click Refresh or enable Auto</p>
+                    </div>
+                    <img id="preview-image" class="preview-image hidden" alt="GoPro Preview">
+                </div>
+                <div class="preview-actions">
+                    <button id="gopro-capture-btn" class="btn btn-gopro btn-large">
+                        <svg class="gopro-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="2" y="6" width="20" height="12" rx="2"/>
+                            <circle cx="12" cy="12" r="3"/>
+                            <circle cx="18" cy="9" r="1" fill="currentColor"/>
+                        </svg>
+                        <span>Capture Photo</span>
+                    </button>
+                </div>
+                <p id="gopro-status" class="gopro-status"></p>
+            </div>
+
+            <!-- File Drop Zone -->
+            <div id="drop-zone" class="drop-zone">
+                <div class="drop-zone-content">
+                    <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    <p>Drag & drop an image here</p>
+                    <p class="or">or</p>
+                    <button id="browse-btn" class="btn btn-primary">Browse Files</button>
+                    <input type="file" id="file-input" accept="image/*" hidden>
+                </div>
+            </div>
+        </div>
+
+        <!-- Progress Section -->
+        <div id="progress-section" class="section hidden">
+            <div class="progress-container">
+                <div class="progress-bar">
+                    <div id="progress-fill" class="progress-fill"></div>
+                </div>
+                <p id="progress-text" class="progress-text">Uploading...</p>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <div id="results-section" class="section hidden">
+            <!-- Timing Display -->
+            <div id="timing-display" class="timing-display">
+                <h3>Processing Time</h3>
+                <div id="timing-details" class="timing-details"></div>
+            </div>
+
+            <!-- Main Layout: Images + Sidebar -->
+            <div class="results-layout">
+                <!-- Images Column -->
+                <div class="images-column">
+                    <!-- Comparison View -->
+                    <div class="comparison-container">
+                        <div class="image-panel">
+                            <h3>Original</h3>
+                            <div class="image-wrapper" id="original-wrapper">
+                                <img id="original-image" alt="Original">
+                            </div>
+                        </div>
+                        <div class="image-panel">
+                            <h3>Result</h3>
+                            <div class="image-wrapper white-bg" id="result-wrapper">
+                                <img id="result-image" alt="Result">
+                                <canvas id="paint-canvas" class="paint-canvas hidden"></canvas>
+                                <div id="brush-cursor" class="brush-cursor hidden"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Download Section -->
+                    <div class="download-section">
+                        <div class="download-buttons">
+                            <button id="download-transparent-btn" class="btn btn-primary">
+                                Download (Transparent)
+                            </button>
+                            <button id="download-white-btn" class="btn btn-secondary">
+                                Download (White BG)
+                            </button>
+                            <button id="new-image-btn" class="btn btn-secondary">
+                                New Image
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Controls Sidebar -->
+                <div class="controls-sidebar">
+                    <!-- Adjustment Controls -->
+                    <div class="controls-section">
+                        <h3>Adjustments</h3>
+
+                        <!-- Sensitivity Slider -->
+                        <div class="control-group">
+                            <label for="sensitivity-slider">Edge Hardness</label>
+                            <div class="slider-container">
+                                <span class="slider-label">Soft</span>
+                                <input type="range" id="sensitivity-slider" min="0" max="100" value="50">
+                                <span class="slider-label">Hard</span>
+                            </div>
+                            <span id="sensitivity-value" class="slider-value">50</span>
+                        </div>
+
+                        <!-- Manual Painting Controls -->
+                        <div class="control-group">
+                            <label>Manual Corrections</label>
+                            <div class="paint-controls">
+                                <button id="keep-btn" class="btn btn-keep btn-sm">Keep</button>
+                                <button id="remove-btn" class="btn btn-remove btn-sm">Remove</button>
+                                <button id="clear-paint-btn" class="btn btn-secondary btn-sm">Clear</button>
+                            </div>
+                            <div class="brush-size-control">
+                                <label for="brush-size">Brush:</label>
+                                <input type="range" id="brush-size" min="5" max="50" value="15">
+                                <span id="brush-size-value">15</span>
+                            </div>
+                        </div>
+
+                        <!-- Apply Button -->
+                        <button id="apply-btn" class="btn btn-primary btn-full">Apply Adjustments</button>
+                    </div>
+
+                    <!-- Subject Zoom & Position -->
+                    <div class="controls-section">
+                        <h3>Subject Zoom & Position</h3>
+                        <p class="section-description">Enlarge and center the subject</p>
+
+                        <div class="control-group">
+                            <label>Zoom Level</label>
+                            <div class="slider-container">
+                                <span class="slider-label">1x</span>
+                                <input type="range" id="subject-zoom-slider" min="100" max="300" value="100" step="10">
+                                <span class="slider-label">3x</span>
+                            </div>
+                            <span id="subject-zoom-value" class="slider-value">100%</span>
+                        </div>
+
+                        <div class="button-row">
+                            <button id="reset-image-btn" class="btn btn-secondary">Reset</button>
+                            <button id="recenter-btn" class="btn btn-secondary">Recenter</button>
+                            <button id="apply-zoom-btn" class="btn btn-primary">Zoom</button>
+                        </div>
+                    </div>
+
+                    <!-- Fullscreen Edit -->
+                    <div class="controls-section">
+                        <button id="fullscreen-btn" class="btn btn-secondary btn-full">
+                            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+                            </svg>
+                            Fullscreen Edit
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Fullscreen Edit Modal -->
+    <div id="fullscreen-modal" class="fullscreen-modal hidden">
+        <div class="fullscreen-header">
+            <h2>Edit Mode</h2>
+            <div class="fullscreen-controls">
+                <div class="paint-controls">
+                    <button id="fs-keep-btn" class="btn btn-keep btn-sm">Keep</button>
+                    <button id="fs-remove-btn" class="btn btn-remove btn-sm">Remove</button>
+                    <button id="fs-clear-btn" class="btn btn-secondary btn-sm">Clear</button>
+                </div>
+                <div class="brush-size-control">
+                    <label>Brush:</label>
+                    <input type="range" id="fs-brush-size" min="5" max="100" value="15">
+                    <span id="fs-brush-size-value">15</span>
+                </div>
+                <div class="zoom-control">
+                    <label>Zoom:</label>
+                    <input type="range" id="fs-zoom-slider" min="100" max="500" value="100" step="25">
+                    <span id="fs-zoom-value">100%</span>
+                </div>
+            </div>
+            <div class="fullscreen-actions">
+                <button id="fs-recenter-btn" class="btn btn-secondary">Recenter</button>
+                <button id="fs-preview-btn" class="btn btn-secondary">Preview</button>
+                <button id="fs-apply-btn" class="btn btn-primary">Apply & Close</button>
+                <button id="fs-close-btn" class="btn btn-secondary">Cancel</button>
+            </div>
+        </div>
+        <div class="fullscreen-canvas-container" id="fs-canvas-container">
+            <div class="fullscreen-image-wrapper" id="fs-image-wrapper">
+                <img id="fs-result-image" alt="Edit">
+                <canvas id="fs-paint-canvas" class="paint-canvas"></canvas>
+                <div id="fs-brush-cursor" class="brush-cursor hidden"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
