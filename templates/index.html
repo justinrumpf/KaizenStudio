@@ -18,14 +18,11 @@
                 <div class="preview-header">
                     <h3>GoPro Preview</h3>
                     <div class="preview-controls">
-                        <select id="preview-interval">
-                            <option value="0">Manual</option>
-                            <option value="2">2s</option>
-                            <option value="5" selected>5s</option>
-                            <option value="10">10s</option>
-                        </select>
-                        <button id="preview-auto-btn" class="btn btn-sm btn-secondary">Auto</button>
-                        <button id="preview-refresh-btn" class="btn btn-sm btn-secondary">Refresh</button>
+                        <button id="stream-toggle-btn" class="btn btn-sm btn-stream">Start Stream</button>
+                        <div id="stream-status-indicator" class="stream-status-indicator">
+                            <span class="status-dot"></span>
+                            <span class="status-text">Offline</span>
+                        </div>
                     </div>
                 </div>
                 <div class="preview-container">
@@ -34,9 +31,37 @@
                             <rect x="2" y="6" width="20" height="12" rx="2"/>
                             <circle cx="12" cy="12" r="3"/>
                         </svg>
-                        <p>Click Refresh or enable Auto</p>
+                        <p>Click "Start Stream" to begin live preview</p>
                     </div>
                     <img id="preview-image" class="preview-image hidden" alt="GoPro Preview">
+                    <img id="stream-feed" class="stream-feed hidden" alt="Live Stream">
+                </div>
+                <div class="camera-controls-row">
+                    <div class="zoom-control-section">
+                        <label for="camera-zoom-slider">Zoom</label>
+                        <div class="zoom-slider-container">
+                            <span class="zoom-label">0%</span>
+                            <input type="range" id="camera-zoom-slider" min="0" max="100" value="0">
+                            <span class="zoom-label">100%</span>
+                        </div>
+                        <span id="camera-zoom-value" class="zoom-value">0%</span>
+                    </div>
+                    <div class="white-balance-section">
+                        <label for="white-balance-select">White Balance</label>
+                        <select id="white-balance-select" class="white-balance-select">
+                            <option value="0">Auto</option>
+                            <option value="1">2300K (Tungsten)</option>
+                            <option value="2">2800K</option>
+                            <option value="3">3200K</option>
+                            <option value="4">4000K</option>
+                            <option value="5">4500K (Fluorescent)</option>
+                            <option value="6">5000K</option>
+                            <option value="7" selected>5500K (Daylight)</option>
+                            <option value="8">6000K</option>
+                            <option value="9">6500K (Cloudy)</option>
+                            <option value="10">Native</option>
+                        </select>
+                    </div>
                 </div>
                 <div class="preview-actions">
                     <button id="gopro-capture-btn" class="btn btn-gopro btn-large">
@@ -157,6 +182,42 @@
 
                         <!-- Apply Button -->
                         <button id="apply-btn" class="btn btn-primary btn-full">Apply Adjustments</button>
+                    </div>
+
+                    <!-- Color Correction -->
+                    <div class="controls-section">
+                        <h3>Color Correction</h3>
+                        <p class="section-description">Adjust white balance after capture</p>
+
+                        <div class="control-group">
+                            <label>Temperature</label>
+                            <div class="preset-buttons">
+                                <button class="btn btn-preset" data-type="temperature" data-value="-60">Cool</button>
+                                <button class="btn btn-preset" data-type="temperature" data-value="-30">Cooler</button>
+                                <button class="btn btn-preset" data-type="temperature" data-value="30">Warmer</button>
+                                <button class="btn btn-preset" data-type="temperature" data-value="60">Warm</button>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <label>Tint</label>
+                            <div class="preset-buttons">
+                                <button class="btn btn-preset" data-type="tint" data-value="-40">Green</button>
+                                <button class="btn btn-preset" data-type="tint" data-value="40">Magenta</button>
+                            </div>
+                        </div>
+
+                        <div class="control-group">
+                            <label>Brightness</label>
+                            <div class="preset-buttons">
+                                <button class="btn btn-preset" data-type="brightness" data-value="-30">Darker</button>
+                                <button class="btn btn-preset" data-type="brightness" data-value="-15">Dim</button>
+                                <button class="btn btn-preset" data-type="brightness" data-value="15">Bright</button>
+                                <button class="btn btn-preset" data-type="brightness" data-value="30">Brighter</button>
+                            </div>
+                        </div>
+
+                        <button id="reset-colors-btn" class="btn btn-secondary btn-full" style="margin-top: 12px;">Reset Colors</button>
                     </div>
 
                     <!-- Subject Zoom & Position -->

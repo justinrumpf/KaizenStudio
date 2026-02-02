@@ -952,3 +952,274 @@ input[type="range"]::-moz-range-thumb {
     height: 100% !important;
     cursor: crosshair;
 }
+
+/* ==================== Stream Controls ==================== */
+
+.btn-stream {
+    background: linear-gradient(135deg, #0066cc, #0099ff);
+    color: white;
+    min-width: 100px;
+}
+
+.btn-stream:hover {
+    background: linear-gradient(135deg, #0055aa, #0088ee);
+}
+
+.btn-stream.active {
+    background: linear-gradient(135deg, #cc3300, #ff4444);
+}
+
+.btn-stream.active:hover {
+    background: linear-gradient(135deg, #aa2200, #dd3333);
+}
+
+/* Stream Status Indicator */
+.stream-status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: 20px;
+    background: rgba(0, 0, 0, 0.3);
+    font-size: 0.85rem;
+}
+
+.stream-status-indicator .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #666;
+}
+
+.stream-status-indicator .status-text {
+    color: #888;
+}
+
+/* Offline state */
+.stream-status-indicator.offline .status-dot {
+    background: #666;
+}
+
+/* Connecting state */
+.stream-status-indicator.connecting .status-dot {
+    background: #ffcc00;
+    animation: pulse-dot 1s infinite;
+}
+
+.stream-status-indicator.connecting .status-text {
+    color: #ffcc00;
+}
+
+/* Live state */
+.stream-status-indicator.live .status-dot {
+    background: #00ff64;
+    box-shadow: 0 0 8px rgba(0, 255, 100, 0.6);
+}
+
+.stream-status-indicator.live .status-text {
+    color: #00ff64;
+    font-weight: 600;
+}
+
+/* Error state */
+.stream-status-indicator.error .status-dot {
+    background: #ff5050;
+}
+
+.stream-status-indicator.error .status-text {
+    color: #ff5050;
+}
+
+@keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+/* Stream Feed */
+.stream-feed {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+/* Zoom Control Section */
+.zoom-control-section {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 15px;
+    margin-bottom: 15px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+}
+
+.zoom-control-section label {
+    color: #888;
+    font-size: 0.9rem;
+    font-weight: 500;
+    min-width: 45px;
+}
+
+.zoom-slider-container {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.zoom-slider-container .zoom-label {
+    color: #666;
+    font-size: 0.75rem;
+    min-width: 30px;
+}
+
+.zoom-value {
+    color: #00d9ff;
+    font-weight: 600;
+    font-size: 0.9rem;
+    min-width: 40px;
+    text-align: right;
+}
+
+/* Camera Controls Row */
+.camera-controls-row {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 15px;
+}
+
+.camera-controls-row .zoom-control-section {
+    flex: 1;
+    margin-bottom: 0;
+}
+
+/* White Balance Section */
+.white-balance-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px 15px;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 8px;
+    min-width: 180px;
+}
+
+.white-balance-section label {
+    color: #888;
+    font-size: 0.9rem;
+    font-weight: 500;
+}
+
+.white-balance-select {
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    color: #fff;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.white-balance-select:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.white-balance-select:focus {
+    outline: none;
+    border-color: #00d9ff;
+    box-shadow: 0 0 0 2px rgba(0, 217, 255, 0.2);
+}
+
+.white-balance-select option {
+    background: #1a1a2e;
+    color: #fff;
+}
+
+/* Color Correction Preset Buttons */
+.preset-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.btn-preset {
+    flex: 1;
+    min-width: 60px;
+    padding: 8px 12px;
+    font-size: 0.8rem;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    color: #ccc;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-preset:hover {
+    background: rgba(0, 217, 255, 0.2);
+    border-color: #00d9ff;
+    color: #fff;
+}
+
+.btn-preset:active {
+    background: rgba(0, 217, 255, 0.3);
+    transform: scale(0.98);
+}
+
+.btn-preset:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Toggle Groups for Edge & Shadow */
+.toggle-group {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.toggle-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    color: #ccc;
+    font-size: 0.9rem;
+}
+
+.toggle-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: #00d9ff;
+}
+
+.level-select {
+    padding: 6px 10px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    color: #fff;
+    font-size: 0.85rem;
+    cursor: pointer;
+    min-width: 90px;
+}
+
+.level-select:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.level-select:focus {
+    outline: none;
+    border-color: #00d9ff;
+}
+
+.level-select option {
+    background: #1a1a2e;
+    color: #fff;
+}

@@ -7,11 +7,13 @@ from io import BytesIO
 from pathlib import Path
 from PIL import Image
 import numpy as np
-from flask import Flask, render_template, request, jsonify, send_file
+from flask import Flask, render_template, request, jsonify, send_file, Response
 from rembg import remove, new_session
 from skimage.measure import label, regionprops
 from scipy.ndimage import gaussian_filter
 import requests
+
+from stream_manager import StreamManager
 
 app = Flask(__name__)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB max upload
@@ -42,6 +44,9 @@ gopro_lock = threading.Lock()
 gopro_photo_in_progress = False
 gopro_photo_mode_set = False  # Track if we've set photo mode this session
 gopro_last_preview = None  # Track last preview: {'path': Path, 'time': timestamp}
+
+# Stream manager for real-time preview
+stream_manager = StreamManager(GOPRO_CREDS_FILE, GOPRO_CERT_FILE, Path(app.config['GOPRO_PHOTOS']))
 
 
 def init_gopro_session():
@@ -574,6 +579,11 @@ def upload():
             img = img.convert('RGB')
         timings['read'] = round((time.time() - step_start) * 1000)
 
+        # Apply fisheye/lens distortion correction
+        step_start = time.time()
+        img = correct_fisheye(img, strength=0.25)
+        timings['lens_correct'] = round((time.time() - step_start) * 1000)
+
         # Store original size for mask corrections
         original_size = img.size
 
@@ -582,7 +592,7 @@ def upload():
         img, was_resized = resize_image(img)
         timings['resize'] = round((time.time() - step_start) * 1000)
 
-        # Save original for comparison
+        # Save original for comparison (after lens correction)
         original_path = os.path.join(app.config['UPLOAD_FOLDER'], f'{image_id}_original.png')
         img.save(original_path, 'PNG')
 
@@ -653,6 +663,114 @@ def adjust():
         # Apply subject zoom if provided
         if subject_zoom > 100:
             img = apply_subject_zoom(img, subject_zoom)
+
+        # Save adjusted image
+        img.save(adjusted_path, 'PNG')
+
+        return jsonify({
+            'success': True,
+            'image_id': image_id
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/color_correct', methods=['POST'])
+def color_correct():
+    """Apply color temperature, tint, and brightness correction to the processed image."""
+    data = request.json
+    image_id = data.get('image_id')
+    temperature = data.get('temperature', 0)  # -100 to +100
+    tint = data.get('tint', 0)  # -100 to +100
+    brightness = data.get('brightness', 0)  # -100 to +100
+
+    if not image_id:
+        return jsonify({'error': 'No image ID provided'}), 400
+
+    try:
+        # Load from adjusted if exists, otherwise from output
+        adjusted_path = os.path.join(app.config['OUTPUT_FOLDER'], f'{image_id}_adjusted.png')
+        output_path = os.path.join(app.config['OUTPUT_FOLDER'], f'{image_id}_output.png')
+
+        if os.path.exists(adjusted_path):
+            img = Image.open(adjusted_path)
+        elif os.path.exists(output_path):
+            img = Image.open(output_path)
+        else:
+            return jsonify({'error': 'Image not found'}), 404
+
+        # Apply color correction
+        if temperature != 0 or tint != 0 or brightness != 0:
+            img = apply_color_correction(img, temperature, tint, brightness)
+
+        # Save adjusted image
+        img.save(adjusted_path, 'PNG')
+
+        return jsonify({
+            'success': True,
+            'image_id': image_id
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/reset_colors', methods=['POST'])
+def reset_colors():
+    """Reset color corrections by removing the adjusted image."""
+    data = request.json
+    image_id = data.get('image_id')
+
+    if not image_id:
+        return jsonify({'error': 'No image ID provided'}), 400
+
+    try:
+        adjusted_path = os.path.join(app.config['OUTPUT_FOLDER'], f'{image_id}_adjusted.png')
+
+        # Delete the adjusted file if it exists
+        if os.path.exists(adjusted_path):
+            os.remove(adjusted_path)
+
+        return jsonify({
+            'success': True,
+            'image_id': image_id
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/apply_effects', methods=['POST'])
+def apply_effects():
+    """Apply edge smoothing and/or drop shadow to the processed image."""
+    data = request.json
+    image_id = data.get('image_id')
+    edge_smooth = data.get('edge_smooth', 0)  # 0-3 (0=none, 1=light, 2=medium, 3=heavy)
+    shadow = data.get('shadow', 0)  # 0-3 (0=none, 1=soft, 2=medium, 3=strong)
+
+    if not image_id:
+        return jsonify({'error': 'No image ID provided'}), 400
+
+    try:
+        # Load from adjusted if exists, otherwise from output
+        adjusted_path = os.path.join(app.config['OUTPUT_FOLDER'], f'{image_id}_adjusted.png')
+        output_path = os.path.join(app.config['OUTPUT_FOLDER'], f'{image_id}_output.png')
+
+        if os.path.exists(adjusted_path):
+            img = Image.open(adjusted_path)
+        elif os.path.exists(output_path):
+            img = Image.open(output_path)
+        else:
+            return jsonify({'error': 'Image not found'}), 404
+
+        # Apply edge smoothing
+        if edge_smooth > 0:
+            img = apply_edge_smoothing(img, edge_smooth)
+
+        # Apply drop shadow
+        if shadow > 0:
+            img = apply_drop_shadow(img, shadow)
 
         # Save adjusted image
         img.save(adjusted_path, 'PNG')
@@ -874,6 +992,9 @@ def get_image(image_type, image_id):
             return jsonify({'error': 'Image not found'}), 404
         img = Image.open(path)
         if img.mode == 'RGBA':
+            # Always apply edge smoothing and drop shadow
+            img = apply_edge_smoothing(img, 2)
+            img = apply_drop_shadow(img, 2)
             img = prepare_ecommerce_image(img)
         buffer = BytesIO()
         img.save(buffer, 'PNG')
@@ -888,6 +1009,9 @@ def get_image(image_type, image_id):
             return jsonify({'error': 'Image not found'}), 404
         img = Image.open(path)
         if img.mode == 'RGBA':
+            # Always apply edge smoothing and drop shadow
+            img = apply_edge_smoothing(img, 2)
+            img = apply_drop_shadow(img, 2)
             img = prepare_ecommerce_image(img)
         buffer = BytesIO()
         img.save(buffer, 'PNG')
@@ -919,8 +1043,11 @@ def download(image_id):
     img = Image.open(path)
 
     if background == 'white':
-        # Create e-commerce ready version with soft edges, shadow, and watermark
+        # Create e-commerce ready version with soft edges, shadow, and white background
         if img.mode == 'RGBA':
+            # Always apply edge smoothing and drop shadow
+            img = apply_edge_smoothing(img, 2)
+            img = apply_drop_shadow(img, 2)
             img = prepare_ecommerce_image(img)
 
         buffer = BytesIO()
@@ -1164,6 +1291,428 @@ def apply_subject_zoom(img, zoom_percent):
     return result
 
 
+def apply_color_correction(img, temperature, tint, brightness=0):
+    """
+    Apply color temperature, tint, and brightness correction to an image.
+
+    temperature: -100 to +100
+        - Negative = cooler (more blue)
+        - Positive = warmer (more orange/yellow)
+
+    tint: -100 to +100
+        - Negative = more green
+        - Positive = more magenta
+
+    brightness: -100 to +100
+        - Negative = darker
+        - Positive = brighter
+    """
+    import numpy as np
+
+    if temperature == 0 and tint == 0 and brightness == 0:
+        return img
+
+    # Preserve alpha channel if present
+    has_alpha = img.mode == 'RGBA'
+    if has_alpha:
+        alpha = img.split()[3]
+        rgb_img = img.convert('RGB')
+    else:
+        rgb_img = img.convert('RGB')
+
+    # Convert to numpy array
+    arr = np.array(rgb_img, dtype=np.float32)
+
+    # Apply brightness adjustment first
+    if brightness != 0:
+        brightness_factor = brightness / 100.0  # -1 to +1
+        # Scale brightness effect (max ~50 units change)
+        arr = arr + (brightness_factor * 50)
+        arr = np.clip(arr, 0, 255)
+
+    # Apply temperature adjustment
+    # Warm = more red/yellow, less blue
+    # Cool = less red, more blue
+    if temperature != 0:
+        temp_factor = temperature / 100.0  # -1 to +1
+
+        # Adjust red channel (increase for warm, decrease for cool)
+        arr[:, :, 0] = np.clip(arr[:, :, 0] + (temp_factor * 30), 0, 255)
+
+        # Adjust blue channel (decrease for warm, increase for cool)
+        arr[:, :, 2] = np.clip(arr[:, :, 2] - (temp_factor * 30), 0, 255)
+
+        # Slight yellow/orange shift for warm (add to green slightly)
+        if temp_factor > 0:
+            arr[:, :, 1] = np.clip(arr[:, :, 1] + (temp_factor * 10), 0, 255)
+
+    # Apply tint adjustment
+    # Green tint = more green
+    # Magenta tint = less green (or more red+blue)
+    if tint != 0:
+        tint_factor = tint / 100.0  # -1 to +1
+
+        # Adjust green channel
+        arr[:, :, 1] = np.clip(arr[:, :, 1] - (tint_factor * 25), 0, 255)
+
+        # Slight compensation on red/blue for magenta
+        if tint_factor > 0:
+            arr[:, :, 0] = np.clip(arr[:, :, 0] + (tint_factor * 10), 0, 255)
+            arr[:, :, 2] = np.clip(arr[:, :, 2] + (tint_factor * 10), 0, 255)
+
+    # Convert back to PIL Image
+    result = Image.fromarray(arr.astype(np.uint8), 'RGB')
+
+    # Restore alpha channel if present
+    if has_alpha:
+        result = result.convert('RGBA')
+        result.putalpha(alpha)
+
+    return result
+
+
+def apply_edge_smoothing(img, level=2):
+    """
+    Smooth jagged edges using morphological operations + anti-aliasing.
+
+    This smooths the contour without making edges overly blurry.
+    """
+    from PIL import ImageFilter
+    import numpy as np
+    from scipy import ndimage
+
+    if img.mode != 'RGBA':
+        return img
+
+    # Split channels
+    r, g, b, a = img.split()
+    alpha_arr = np.array(a, dtype=np.float32)
+
+    # Create binary mask
+    binary = (alpha_arr > 128).astype(np.uint8)
+
+    # Use a disk-like structuring element for smoother results
+    struct = np.array([[0,1,0],
+                       [1,1,1],
+                       [0,1,0]], dtype=np.uint8)
+
+    # More aggressive smoothing with multiple iterations
+    iterations = max(2, int(level))
+
+    # Close (fill small gaps, smooth outward bumps)
+    smoothed = ndimage.binary_closing(binary, structure=struct, iterations=iterations)
+    # Open (remove small protrusions, smooth inward bumps)
+    smoothed = ndimage.binary_opening(smoothed, structure=struct, iterations=iterations)
+
+    # Convert back to alpha values
+    smoothed_alpha = smoothed.astype(np.float32) * 255
+
+    # Apply subtle anti-aliasing (0.75px) to soften the pixel edges
+    smoothed_pil = Image.fromarray(smoothed_alpha.astype(np.uint8), 'L')
+    smoothed_pil = smoothed_pil.filter(ImageFilter.GaussianBlur(radius=0.75))
+
+    # Sharpen the alpha slightly to keep edges defined but smooth
+    alpha_arr_final = np.array(smoothed_pil, dtype=np.float32)
+    # Threshold to sharpen: push mid-values towards 0 or 255
+    alpha_arr_final = np.where(alpha_arr_final > 200, 255,
+                               np.where(alpha_arr_final < 55, 0, alpha_arr_final))
+
+    smoothed_pil = Image.fromarray(alpha_arr_final.astype(np.uint8), 'L')
+
+    # Merge channels back
+    return Image.merge('RGBA', (r, g, b, smoothed_pil))
+
+
+def correct_fisheye(img, strength=0.3):
+    """
+    Correct barrel/fisheye distortion from wide-angle GoPro lens.
+
+    strength: 0.0 = no correction, 0.5 = strong correction
+    """
+    import numpy as np
+    import cv2
+
+    # Convert PIL to OpenCV format
+    if img.mode == 'RGBA':
+        img_array = np.array(img)
+        # OpenCV uses BGR, PIL uses RGB
+        img_cv = cv2.cvtColor(img_array, cv2.COLOR_RGBA2BGRA)
+    else:
+        img_array = np.array(img.convert('RGB'))
+        img_cv = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+
+    h, w = img_cv.shape[:2]
+
+    # Camera matrix (approximate for GoPro-like wide angle)
+    focal_length = w
+    center = (w / 2, h / 2)
+    camera_matrix = np.array([
+        [focal_length, 0, center[0]],
+        [0, focal_length, center[1]],
+        [0, 0, 1]
+    ], dtype=np.float32)
+
+    # Distortion coefficients for barrel distortion correction
+    # k1 negative = correct barrel distortion (pincushion correction)
+    k1 = -strength  # Primary radial distortion
+    k2 = strength * 0.1  # Secondary radial
+    dist_coeffs = np.array([k1, k2, 0, 0, 0], dtype=np.float32)
+
+    # Get optimal new camera matrix
+    new_camera_matrix, roi = cv2.getOptimalNewCameraMatrix(
+        camera_matrix, dist_coeffs, (w, h), 1, (w, h)
+    )
+
+    # Undistort
+    corrected = cv2.undistort(img_cv, camera_matrix, dist_coeffs, None, new_camera_matrix)
+
+    # Crop to ROI if valid
+    x, y, rw, rh = roi
+    if rw > 0 and rh > 0:
+        corrected = corrected[y:y+rh, x:x+rw]
+        # Resize back to original dimensions
+        corrected = cv2.resize(corrected, (w, h), interpolation=cv2.INTER_LANCZOS4)
+
+    # Convert back to PIL
+    if img.mode == 'RGBA':
+        corrected = cv2.cvtColor(corrected, cv2.COLOR_BGRA2RGBA)
+        return Image.fromarray(corrected, 'RGBA')
+    else:
+        corrected = cv2.cvtColor(corrected, cv2.COLOR_BGR2RGB)
+        return Image.fromarray(corrected, 'RGB')
+
+
+def apply_drop_shadow(img, level):
+    """
+    Apply a drop shadow to the image.
+    Light source is from top-left, so shadow falls to bottom-right.
+
+    level: 1=soft, 2=medium, 3=strong
+    """
+    from PIL import ImageFilter
+    import numpy as np
+
+    if img.mode != 'RGBA':
+        return img
+
+    width, height = img.size
+
+    # Shadow parameters based on level
+    params = {
+        1: {'offset': (4, 4), 'blur': 8, 'opacity': 0.15},
+        2: {'offset': (6, 6), 'blur': 12, 'opacity': 0.25},
+        3: {'offset': (10, 10), 'blur': 18, 'opacity': 0.35},
+    }.get(level, {'offset': (6, 6), 'blur': 12, 'opacity': 0.25})
+
+    offset_x, offset_y = params['offset']
+    blur_radius = params['blur']
+    opacity = params['opacity']
+
+    # Get alpha channel
+    alpha = img.split()[3]
+
+    # Create shadow from alpha channel
+    shadow = Image.new('RGBA', (width + offset_x + blur_radius * 2, height + offset_y + blur_radius * 2), (0, 0, 0, 0))
+
+    # Paste alpha as shadow base (offset to bottom-right)
+    shadow_alpha = alpha.copy()
+    shadow.paste((0, 0, 0, int(255 * opacity)), (blur_radius + offset_x, blur_radius + offset_y), shadow_alpha)
+
+    # Blur the shadow
+    shadow = shadow.filter(ImageFilter.GaussianBlur(radius=blur_radius))
+
+    # Create result canvas
+    result = Image.new('RGBA', (width, height), (255, 255, 255, 0))
+
+    # Paste shadow (cropped to original size)
+    shadow_cropped = shadow.crop((blur_radius, blur_radius, blur_radius + width, blur_radius + height))
+    result = Image.alpha_composite(result, shadow_cropped)
+
+    # Paste original image on top
+    result = Image.alpha_composite(result, img)
+
+    return result
+
+
+# ==================== GoPro Stream Routes ====================
+
+@app.route('/gopro/stream/start', methods=['POST'])
+def gopro_stream_start():
+    """Start the GoPro preview stream."""
+    try:
+        success = stream_manager.start_stream()
+        status = stream_manager.get_status()
+        return jsonify({
+            'success': success,
+            **status
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/gopro/stream/stop', methods=['POST'])
+def gopro_stream_stop():
+    """Stop the GoPro preview stream."""
+    try:
+        stream_manager.stop_stream()
+        return jsonify({'success': True, 'status': 'stopped'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/gopro/stream/status')
+def gopro_stream_status():
+    """Get current stream status."""
+    return jsonify(stream_manager.get_status())
+
+
+@app.route('/gopro/stream/feed')
+def gopro_stream_feed():
+    """MJPEG stream endpoint for browser display."""
+    def generate():
+        last_frame_id = 0
+        wait_count = 0
+
+        while stream_manager.streaming:
+            frame = stream_manager.get_frame()
+            current_count = stream_manager.frame_count
+
+            if frame and current_count > last_frame_id:
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                last_frame_id = current_count
+                wait_count = 0
+            else:
+                wait_count += 1
+                if wait_count > 300:  # ~30 seconds timeout
+                    break
+
+            time.sleep(0.1)
+
+    return Response(
+        generate(),
+        mimetype='multipart/x-mixed-replace; boundary=frame'
+    )
+
+
+@app.route('/gopro/stream/snapshot', methods=['POST'])
+def gopro_stream_snapshot():
+    """Capture current frame and process for background removal."""
+    global gopro_last_preview
+
+    timings = {}
+    total_start = time.time()
+
+    # Get snapshot from stream
+    step_start = time.time()
+    snapshot_path = stream_manager.capture_snapshot()
+    if not snapshot_path:
+        return jsonify({'error': 'No frame available. Is the stream running?'}), 400
+    timings['snapshot'] = round((time.time() - step_start) * 1000)
+
+    try:
+        # Generate unique ID for this image
+        image_id = str(uuid.uuid4())
+
+        # Read and process image
+        step_start = time.time()
+        img = Image.open(snapshot_path)
+        print(f"Stream snapshot captured: {img.size[0]}x{img.size[1]}")
+        if img.mode == 'RGBA':
+            background = Image.new('RGB', img.size, (255, 255, 255))
+            background.paste(img, mask=img.split()[3])
+            img = background
+        elif img.mode != 'RGB':
+            img = img.convert('RGB')
+        timings['read'] = round((time.time() - step_start) * 1000)
+
+        # Apply fisheye/lens distortion correction (GoPro wide-angle)
+        step_start = time.time()
+        img = correct_fisheye(img, strength=0.25)
+        timings['lens_correct'] = round((time.time() - step_start) * 1000)
+
+        # Store original size
+        original_size = img.size
+
+        # Resize if needed
+        step_start = time.time()
+        img, was_resized = resize_image(img)
+        timings['resize'] = round((time.time() - step_start) * 1000)
+
+        # Save original for comparison (after lens correction)
+        original_path = os.path.join(app.config['UPLOAD_FOLDER'], f'{image_id}_original.png')
+        img.save(original_path, 'PNG')
+
+        # Remove background
+        step_start = time.time()
+        output = remove(img, session=session)
+        timings['remove_bg'] = round((time.time() - step_start) * 1000)
+
+        # Clean edges
+        step_start = time.time()
+        output = clean_edges(output, erode_pixels=3)
+        timings['clean_edges'] = round((time.time() - step_start) * 1000)
+
+        # Save processed image
+        step_start = time.time()
+        output_path = os.path.join(app.config['OUTPUT_FOLDER'], f'{image_id}_output.png')
+        output.save(output_path, 'PNG')
+        timings['save'] = round((time.time() - step_start) * 1000)
+
+        timings['total'] = round((time.time() - total_start) * 1000)
+
+        return jsonify({
+            'success': True,
+            'image_id': image_id,
+            'timings': timings,
+            'original_size': list(original_size),
+            'processed_size': list(img.size),
+            'was_resized': was_resized,
+            'source': 'stream'
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/gopro/zoom', methods=['POST'])
+def gopro_zoom():
+    """Set the GoPro digital zoom level."""
+    data = request.json
+    percent = data.get('percent', 0)
+
+    try:
+        percent = int(percent)
+        percent = max(0, min(100, percent))
+
+        success = stream_manager.set_zoom(percent)
+        if success:
+            return jsonify({'success': True, 'zoom': percent})
+        else:
+            return jsonify({'success': False, 'error': stream_manager.error_message}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/gopro/white_balance', methods=['POST'])
+def gopro_white_balance():
+    """Set the GoPro white balance setting."""
+    data = request.json
+    option = data.get('option', 0)
+
+    try:
+        option = int(option)
+        # White balance setting ID is 22
+        # Options: 0=Auto, 1=2300K, 2=2800K, 3=3200K, 4=4000K, 5=4500K, 6=5000K, 7=5500K, 8=6000K, 9=6500K, 10=Native
+        success = stream_manager.set_setting(22, option)
+        if success:
+            return jsonify({'success': True, 'white_balance': option})
+        else:
+            return jsonify({'success': False, 'error': stream_manager.error_message}), 500
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
 @app.route('/gopro/capture', methods=['POST'])
 def gopro_capture():
     """Capture a photo with GoPro and process it for background removal."""
@@ -1172,6 +1721,11 @@ def gopro_capture():
     timings = {}
     total_start = time.time()
     used_preview = False
+
+    # Check if stream is running - use snapshot instead
+    if stream_manager.streaming:
+        # Redirect to stream snapshot for instant capture
+        return gopro_stream_snapshot()
 
     # Check if we have a recent preview we can use (within 15 seconds)
     if gopro_last_preview and (time.time() - gopro_last_preview['time']) < 15:

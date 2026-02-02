@@ -17,6 +17,10 @@ let previewTimer = null;
 let isPreviewRefreshing = false;
 let captureInProgress = false;
 
+// Stream state
+let streamActive = false;
+let streamStatusCheckInterval = null;
+
 // DOM Elements
 const dropZone = document.getElementById('drop-zone');
 const fileInput = document.getElementById('file-input');
@@ -51,6 +55,10 @@ const resetImageBtn = document.getElementById('reset-image-btn');
 const fullscreenBtn = document.getElementById('fullscreen-btn');
 const resultWrapper = document.getElementById('result-wrapper');
 
+// Color Correction DOM Elements
+const colorPresetButtons = document.querySelectorAll('.btn-preset');
+const resetColorsBtn = document.getElementById('reset-colors-btn');
+
 // Fullscreen Modal DOM Elements
 const fullscreenModal = document.getElementById('fullscreen-modal');
 const fsResultImage = document.getElementById('fs-result-image');
@@ -73,13 +81,18 @@ const fsCanvasContainer = document.getElementById('fs-canvas-container');
 
 // GoPro DOM Elements
 const goproPreviewSection = document.getElementById('gopro-preview-section');
-const previewIntervalSelect = document.getElementById('preview-interval');
-const previewAutoBtn = document.getElementById('preview-auto-btn');
-const previewRefreshBtn = document.getElementById('preview-refresh-btn');
 const previewPlaceholder = document.getElementById('preview-placeholder');
 const previewImage = document.getElementById('preview-image');
 const goproCaptureBtn = document.getElementById('gopro-capture-btn');
 const goproStatus = document.getElementById('gopro-status');
+
+// Stream DOM Elements
+const streamToggleBtn = document.getElementById('stream-toggle-btn');
+const streamStatusIndicator = document.getElementById('stream-status-indicator');
+const streamFeed = document.getElementById('stream-feed');
+const cameraZoomSlider = document.getElementById('camera-zoom-slider');
+const cameraZoomValue = document.getElementById('camera-zoom-value');
+const whiteBalanceSelect = document.getElementById('white-balance-select');
 
 // Initialize
 document.addEventListener('DOMContentLoaded', init);
@@ -91,9 +104,12 @@ function init() {
 
     // GoPro handlers
     goproCaptureBtn.addEventListener('click', captureWithGoPro);
-    previewIntervalSelect.addEventListener('change', updatePreviewInterval);
-    previewAutoBtn.addEventListener('click', togglePreviewAuto);
-    previewRefreshBtn.addEventListener('click', refreshPreview);
+
+    // Stream handlers
+    streamToggleBtn.addEventListener('click', toggleStream);
+    cameraZoomSlider.addEventListener('input', handleCameraZoomInput);
+    cameraZoomSlider.addEventListener('change', setCameraZoom);
+    whiteBalanceSelect.addEventListener('change', setWhiteBalance);
 
     // Check GoPro status on load
     checkGoproStatus();
@@ -151,6 +167,12 @@ function init() {
     applyZoomBtn.addEventListener('click', applySubjectZoom);
     recenterBtn.addEventListener('click', recenterSubject);
     resetImageBtn.addEventListener('click', resetToOriginal);
+
+    // Color Correction preset button handlers
+    colorPresetButtons.forEach(btn => {
+        btn.addEventListener('click', handleColorPreset);
+    });
+    resetColorsBtn.addEventListener('click', resetColors);
 
     // Fullscreen handlers
     fullscreenBtn.addEventListener('click', openFullscreen);
@@ -303,7 +325,6 @@ function displayResults(data) {
 
     // Add cache-busting timestamp
     const timestamp = Date.now();
-
     // Display images
     originalImage.src = `/image/original/${currentImageId}?t=${timestamp}`;
     resultImage.src = `/image/output-white/${currentImageId}?t=${timestamp}`;
@@ -475,9 +496,8 @@ async function applyAdjustments() {
             throw new Error(data.error);
         }
 
-        // Refresh result image (with soft edges and shadow)
-        const timestamp = Date.now();
-        resultImage.src = `/image/adjusted-white/${currentImageId}?t=${timestamp}`;
+        // Apply effects and refresh
+        refreshResultImage();
 
         // Clear paint after applying
         clearPaint();
@@ -558,9 +578,8 @@ async function applySubjectZoom() {
             throw new Error(data.error);
         }
 
-        // Refresh result image
-        const timestamp = Date.now();
-        resultImage.src = `/image/adjusted-white/${currentImageId}?t=${timestamp}`;
+        // Apply effects and refresh
+        refreshResultImage();
 
         // Reset zoom slider after applying
         subjectZoomSlider.value = 100;
@@ -572,6 +591,104 @@ async function applySubjectZoom() {
         applyZoomBtn.disabled = false;
         applyZoomBtn.textContent = 'Apply Zoom';
     }
+}
+
+// ==================== COLOR CORRECTION ====================
+
+async function handleColorPreset(e) {
+    const btn = e.target;
+    const type = btn.dataset.type;
+    const value = parseInt(btn.dataset.value);
+
+    if (!currentImageId) {
+        alert('No image loaded');
+        return;
+    }
+
+    // Disable button while processing
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = '...';
+
+    try {
+        const payload = {
+            image_id: currentImageId,
+            temperature: 0,
+            tint: 0,
+            brightness: 0
+        };
+
+        // Set the appropriate value based on type
+        payload[type] = value;
+
+        const response = await fetch('/color_correct', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+
+        if (data.error) {
+            throw new Error(data.error);
+        }
+
+        // Apply effects and refresh
+        refreshResultImage();
+
+    } catch (error) {
+        alert('Error applying color correction: ' + error.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+    }
+}
+
+async function resetColors() {
+    if (!currentImageId) {
+        alert('No image loaded');
+        return;
+    }
+
+    resetColorsBtn.disabled = true;
+    resetColorsBtn.textContent = 'Resetting...';
+
+    try {
+        const response = await fetch('/reset_colors', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                image_id: currentImageId
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.error) {
+            throw new Error(data.error);
+        }
+
+        // Apply effects and refresh
+        refreshResultImage();
+
+    } catch (error) {
+        alert('Error resetting colors: ' + error.message);
+    } finally {
+        resetColorsBtn.disabled = false;
+        resetColorsBtn.textContent = 'Reset Colors';
+    }
+}
+
+// ==================== IMAGE REFRESH ====================
+
+function refreshResultImage() {
+    if (!currentImageId) return;
+    const timestamp = Date.now();
+    resultImage.src = `/image/adjusted-white/${currentImageId}?t=${timestamp}`;
 }
 
 // ==================== FULLSCREEN EDIT MODE ====================
@@ -832,9 +949,8 @@ async function recenterSubject() {
             throw new Error(data.error);
         }
 
-        // Refresh result image
-        const timestamp = Date.now();
-        resultImage.src = `/image/adjusted-white/${currentImageId}?t=${timestamp}`;
+        // Refresh result image with effects
+        refreshResultImage();
 
     } catch (error) {
         alert('Error recentering: ' + error.message);
@@ -873,9 +989,8 @@ async function applyFullscreenChanges() {
             throw new Error(data.error);
         }
 
-        // Refresh both images
-        const timestamp = Date.now();
-        resultImage.src = `/image/adjusted-white/${currentImageId}?t=${timestamp}`;
+        // Refresh with effects
+        refreshResultImage();
 
         // Close fullscreen and reset main canvas
         closeFullscreen();
@@ -912,6 +1027,9 @@ async function checkGoproStatus() {
                 goproStatus.textContent = `Connected at ${data.ip_address}`;
                 goproStatus.classList.remove('error', 'warning');
                 goproStatus.classList.add('success');
+
+                // Also check stream status
+                checkStreamStatus();
             } else {
                 goproAvailable = false;
                 goproCaptureBtn.classList.remove('connected');
@@ -929,70 +1047,198 @@ async function checkGoproStatus() {
     }
 }
 
-// Preview functions
-function updatePreviewInterval() {
-    previewInterval = parseInt(previewIntervalSelect.value) * 1000;
-    if (previewAutoRefresh && previewInterval > 0) {
-        startPreviewAutoRefresh();
-    } else if (previewInterval === 0) {
-        stopPreviewAutoRefresh();
-        previewAutoBtn.classList.remove('active');
-        previewAutoRefresh = false;
-    }
-}
+// ==================== Stream Functions ====================
 
-function togglePreviewAuto() {
-    previewAutoRefresh = !previewAutoRefresh;
-
-    if (previewAutoRefresh) {
-        previewAutoBtn.classList.add('active');
-        if (previewInterval > 0) {
-            refreshPreview();
-            startPreviewAutoRefresh();
-        }
+async function toggleStream() {
+    if (streamActive) {
+        await stopStream();
     } else {
-        previewAutoBtn.classList.remove('active');
-        stopPreviewAutoRefresh();
+        await startStream();
     }
 }
 
-function startPreviewAutoRefresh() {
-    stopPreviewAutoRefresh();
-    if (previewInterval > 0) {
-        previewTimer = setInterval(refreshPreview, previewInterval);
-    }
-}
-
-function stopPreviewAutoRefresh() {
-    if (previewTimer) {
-        clearInterval(previewTimer);
-        previewTimer = null;
-    }
-}
-
-async function refreshPreview() {
-    if (isPreviewRefreshing || captureInProgress) return;
-    isPreviewRefreshing = true;
-
-    previewRefreshBtn.textContent = '...';
+async function startStream() {
+    streamToggleBtn.disabled = true;
+    streamToggleBtn.textContent = 'Starting...';
+    updateStreamStatus('connecting');
 
     try {
-        const response = await fetch('/gopro/preview', { method: 'POST' });
+        const response = await fetch('/gopro/stream/start', { method: 'POST' });
         const data = await response.json();
+        console.log('Stream start response:', data);
 
         if (data.success) {
-            previewImage.src = data.photo_url + '?t=' + Date.now();
-            previewImage.classList.remove('hidden');
+            streamActive = true;
+            streamToggleBtn.textContent = 'Stop Stream';
+            streamToggleBtn.classList.add('active');
+            updateStreamStatus('live');
+
+            // Show the stream feed with cache-busting
+            streamFeed.src = '/gopro/stream/feed?t=' + Date.now();
+            streamFeed.classList.remove('hidden');
             previewPlaceholder.classList.add('hidden');
-        } else if (data.error !== 'Camera busy') {
-            console.error('Preview error:', data.error);
+            previewImage.classList.add('hidden');
+
+            // Start status checking
+            startStreamStatusCheck();
+
+            goproStatus.textContent = 'Preview active (updates every ~2 seconds)';
+            goproStatus.classList.remove('error');
+            goproStatus.classList.add('success');
+        } else {
+            const errorMsg = data.error || (data.status === 'error' ? 'Stream failed to start' : 'Unknown error');
+            throw new Error(errorMsg);
         }
     } catch (error) {
-        console.error('Preview error:', error);
+        console.error('Error starting stream:', error);
+        updateStreamStatus('error', error.message);
+        goproStatus.textContent = `Stream error: ${error.message}`;
+        goproStatus.classList.remove('success');
+        goproStatus.classList.add('error');
+        streamToggleBtn.textContent = 'Start Stream';
+        streamToggleBtn.classList.remove('active');
+    } finally {
+        streamToggleBtn.disabled = false;
+    }
+}
+
+async function stopStream() {
+    streamToggleBtn.disabled = true;
+    streamToggleBtn.textContent = 'Stopping...';
+
+    try {
+        await fetch('/gopro/stream/stop', { method: 'POST' });
+    } catch (error) {
+        console.error('Error stopping stream:', error);
     }
 
-    previewRefreshBtn.textContent = 'Refresh';
-    isPreviewRefreshing = false;
+    streamActive = false;
+    streamToggleBtn.textContent = 'Start Stream';
+    streamToggleBtn.classList.remove('active');
+    streamToggleBtn.disabled = false;
+    updateStreamStatus('offline');
+
+    // Hide stream feed, show placeholder
+    streamFeed.src = '';
+    streamFeed.classList.add('hidden');
+    previewPlaceholder.classList.remove('hidden');
+
+    // Stop status checking
+    stopStreamStatusCheck();
+}
+
+function updateStreamStatus(status, message = '') {
+    const indicator = streamStatusIndicator;
+    const dot = indicator.querySelector('.status-dot');
+    const text = indicator.querySelector('.status-text');
+
+    // Remove all status classes
+    indicator.classList.remove('connecting', 'live', 'error', 'offline');
+    indicator.classList.add(status);
+
+    switch (status) {
+        case 'connecting':
+            text.textContent = 'Connecting...';
+            break;
+        case 'live':
+            text.textContent = 'Live';
+            break;
+        case 'error':
+            text.textContent = message || 'Error';
+            break;
+        case 'offline':
+        default:
+            text.textContent = 'Offline';
+            break;
+    }
+}
+
+async function checkStreamStatus() {
+    try {
+        const response = await fetch('/gopro/stream/status');
+        const data = await response.json();
+
+        if (data.streaming && !streamActive) {
+            // Stream is running but UI doesn't know - sync up
+            streamActive = true;
+            streamToggleBtn.textContent = 'Stop Stream';
+            streamToggleBtn.classList.add('active');
+            updateStreamStatus('live');
+            streamFeed.src = '/gopro/stream/feed';
+            streamFeed.classList.remove('hidden');
+            previewPlaceholder.classList.add('hidden');
+            startStreamStatusCheck();
+        } else if (!data.streaming && streamActive) {
+            // Stream stopped unexpectedly
+            streamActive = false;
+            streamToggleBtn.textContent = 'Start Stream';
+            streamToggleBtn.classList.remove('active');
+            updateStreamStatus(data.status === 'error' ? 'error' : 'offline', data.error);
+            streamFeed.classList.add('hidden');
+            previewPlaceholder.classList.remove('hidden');
+            stopStreamStatusCheck();
+        }
+    } catch (error) {
+        console.error('Error checking stream status:', error);
+    }
+}
+
+function startStreamStatusCheck() {
+    stopStreamStatusCheck();
+    streamStatusCheckInterval = setInterval(checkStreamStatus, 3000);
+}
+
+function stopStreamStatusCheck() {
+    if (streamStatusCheckInterval) {
+        clearInterval(streamStatusCheckInterval);
+        streamStatusCheckInterval = null;
+    }
+}
+
+function handleCameraZoomInput(e) {
+    cameraZoomValue.textContent = e.target.value + '%';
+}
+
+async function setCameraZoom() {
+    const percent = parseInt(cameraZoomSlider.value);
+
+    try {
+        const response = await fetch('/gopro/zoom', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ percent })
+        });
+
+        const data = await response.json();
+        if (!data.success) {
+            console.error('Zoom error:', data.error);
+        }
+    } catch (error) {
+        console.error('Error setting zoom:', error);
+    }
+}
+
+async function setWhiteBalance() {
+    const option = parseInt(whiteBalanceSelect.value);
+
+    try {
+        const response = await fetch('/gopro/white_balance', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ option })
+        });
+
+        const data = await response.json();
+        if (!data.success) {
+            console.error('White balance error:', data.error);
+            alert('Failed to set white balance: ' + data.error);
+        } else {
+            console.log('White balance set to option:', option);
+        }
+    } catch (error) {
+        console.error('Error setting white balance:', error);
+        alert('Error setting white balance: ' + error.message);
+    }
 }
 
 async function captureWithGoPro() {
@@ -1004,12 +1250,53 @@ async function captureWithGoPro() {
         }
     }
 
-    // Stop preview during capture
     captureInProgress = true;
-    const wasAutoRefresh = previewAutoRefresh;
-    if (wasAutoRefresh) stopPreviewAutoRefresh();
-
     showProgress();
+
+    // Use stream snapshot if stream is active (instant capture)
+    if (streamActive) {
+        updateProgress(10, 'Capturing from stream...');
+
+        try {
+            const response = await fetch('/gopro/stream/snapshot', { method: 'POST' });
+
+            updateProgress(50, 'Processing image...');
+
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                throw new Error(data.error || `Capture failed (${response.status})`);
+            }
+
+            const data = await response.json();
+
+            if (data.error) {
+                throw new Error(data.error);
+            }
+
+            updateProgress(90, 'Finalizing...');
+
+            currentImageId = data.image_id;
+            originalSize = data.original_size;
+            processedSize = data.processed_size;
+
+            displayStreamCaptureResults(data);
+
+            updateProgress(100, 'Complete!');
+
+            setTimeout(() => {
+                showResults();
+            }, 500);
+
+        } catch (error) {
+            alert('Error capturing from stream: ' + error.message);
+            resetUI();
+        } finally {
+            captureInProgress = false;
+        }
+        return;
+    }
+
+    // Traditional capture (shutter trigger)
     updateProgress(5, 'Connecting to GoPro...');
 
     try {
@@ -1055,7 +1342,6 @@ async function captureWithGoPro() {
         checkGoproStatus();
     } finally {
         captureInProgress = false;
-        if (wasAutoRefresh) startPreviewAutoRefresh();
     }
 }
 
@@ -1098,7 +1384,46 @@ function displayGoproResults(data) {
 
     // Add cache-busting timestamp
     const timestamp = Date.now();
+    // Display images
+    originalImage.src = `/image/original/${currentImageId}?t=${timestamp}`;
+    resultImage.src = `/image/output-white/${currentImageId}?t=${timestamp}`;
 
+    // Setup canvas after image loads
+    resultImage.onload = () => {
+        setupCanvas();
+    };
+
+    // Reset adjustments
+    sensitivitySlider.value = 50;
+    sensitivityValue.textContent = '50';
+    clearPaint();
+
+    // Reset subject zoom
+    subjectZoomSlider.value = 100;
+    subjectZoomValue.textContent = '100%';
+}
+
+function displayStreamCaptureResults(data) {
+    // Display timing information for stream capture (instant)
+    const timings = data.timings;
+
+    timingDetails.innerHTML = `
+        <div class="timing-item">
+            <span class="label">Snapshot</span>
+            <span class="value">${timings.snapshot}ms</span>
+        </div>
+        <div class="timing-item">
+            <span class="label">Remove BG</span>
+            <span class="value">${timings.remove_bg}ms</span>
+        </div>
+        <div class="timing-item total">
+            <span class="label">Total</span>
+            <span class="value">${timings.total}ms</span>
+        </div>
+    `;
+
+    // Add cache-busting timestamp
+    const timestamp = Date.now();
     // Display images
     originalImage.src = `/image/original/${currentImageId}?t=${timestamp}`;
     resultImage.src = `/image/output-white/${currentImageId}?t=${timestamp}`;
@@ -1127,14 +1452,6 @@ function resetUI() {
     isPainting = false;
     paintPoints = { keep: [], remove: [], brushSize: 15 };
 
-    // Reset zoom
-    currentZoom = 100;
-    zoomSlider.value = 100;
-    zoomValue.textContent = '100%';
-    if (zoomContainer) {
-        zoomContainer.style.transform = 'scale(1)';
-    }
-
     // Close fullscreen if open
     if (fullscreenMode) {
         closeFullscreen();
@@ -1146,6 +1463,10 @@ function resetUI() {
 
     progressFill.style.width = '0%';
     fileInput.value = '';
+
+    // Reset subject zoom
+    subjectZoomSlider.value = 100;
+    subjectZoomValue.textContent = '100%';
 
     // Recheck GoPro status when returning to upload screen
     checkGoproStatus();
