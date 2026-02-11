@@ -2437,6 +2437,11 @@ def _run_provisioning(ssid, password, identifier):
             creds_path=GOPRO_CREDS_FILE,
         ))
 
+        # Verify credentials were saved; save again if files are missing
+        if not GOPRO_CERT_FILE.exists() or not GOPRO_CREDS_FILE.exists():
+            logging.warning("Credential files not found after provisioning — saving manually")
+            credentials.save(GOPRO_CERT_FILE, GOPRO_CREDS_FILE)
+
         with provision_lock:
             provision_status['step'] = 'complete'
             provision_status['message'] = f'Provisioning complete! IP: {credentials.ip_address}'

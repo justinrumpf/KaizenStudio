@@ -311,11 +311,16 @@ async def _get_cohn_status(manager: ResponseManager) -> proto.NotifyCOHNStatus:
             raise RuntimeError("Unexpected response to COHN status request")
 
         status = cast(proto.NotifyCOHNStatus, response.data)
-        logger.debug(f"COHN state: {status.state}")
+        logger.debug(f"COHN state: {status.state}, user={status.username!r}, ip={status.ipaddress!r}")
 
         if status.state == proto.EnumCOHNNetworkState.COHN_STATE_NetworkConnected:
-            logger.info(f"COHN connected! IP: {status.ipaddress}")
-            return status
+            # Wait until credentials are fully populated (new cameras may
+            # send NetworkConnected before username/password are ready)
+            if status.username and status.password and status.ipaddress:
+                logger.info(f"COHN connected! IP: {status.ipaddress}")
+                return status
+            else:
+                logger.info("COHN connected but credentials not yet ready, waiting...")
         elif status.state == proto.EnumCOHNNetworkState.COHN_STATE_Error:
             raise RuntimeError("COHN encountered an error")
 

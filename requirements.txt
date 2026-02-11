@@ -11,4 +11,7 @@ opencv-python>=4.8.0
 torch>=1.7.0
 torchvision>=0.8.0
 timm
+bleak>=0.21.0
+pytz>=2023.3
+tzlocal>=5.0
 git+https://github.com/ChaoningZhang/MobileSAM.git
