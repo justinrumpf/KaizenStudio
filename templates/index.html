@@ -3,296 +3,2533 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Background Remover</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <title>Clothes Mentor - Background Remover</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #f5f5f5;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Header */
+        .header {
+            background: #fff;
+            padding: 8px 20px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #e0e0e0;
+            height: 50px;
+        }
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .logo { height: 34px; }
+        .header h1 {
+            font-size: 1.2em;
+            color: #333;
+            font-weight: 600;
+        }
+        .header-controls {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .bg-method-select {
+            padding: 6px 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 12px;
+            background: #fff;
+        }
+        .status-badge {
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .status-badge.connected { background: #d4edda; color: #155724; }
+        .status-badge.disconnected { background: #f8d7da; color: #721c24; }
+
+        /* Battery Indicator */
+        .battery-indicator {
+            display: none;
+            align-items: center;
+            gap: 5px;
+            font-size: 11px;
+            font-weight: 500;
+            color: #555;
+        }
+        .battery-indicator.visible { display: flex; }
+        .battery-icon {
+            position: relative;
+            width: 24px;
+            height: 12px;
+            border: 1.5px solid #555;
+            border-radius: 2px;
+        }
+        .battery-icon::after {
+            content: '';
+            position: absolute;
+            right: -4px;
+            top: 2px;
+            width: 2px;
+            height: 6px;
+            background: #555;
+            border-radius: 0 1px 1px 0;
+        }
+        .battery-fill {
+            height: 100%;
+            border-radius: 1px;
+            transition: width 0.5s, background 0.5s;
+            background: #4caf50;
+        }
+        .battery-indicator.low .battery-fill { background: #f44336; }
+        .battery-indicator.medium .battery-fill { background: #ff9800; }
+        .battery-indicator.charging .battery-pct::after {
+            content: ' \26A1';
+        }
+
+        /* Settings Gear Button */
+        .settings-gear {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            transition: all 0.2s;
+        }
+        .settings-gear:hover { color: #333; background: #f0f0f0; }
+        .settings-gear svg { width: 22px; height: 22px; }
+
+        /* Settings Overlay & Modal */
+        .settings-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+        .settings-overlay.visible { display: flex; }
+        .settings-modal {
+            background: #fff;
+            border-radius: 12px;
+            width: 480px;
+            max-width: 95vw;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        .settings-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .settings-modal-header h2 { font-size: 16px; font-weight: 600; color: #333; }
+        .settings-close-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 4px;
+            color: #999;
+            font-size: 20px;
+            line-height: 1;
+        }
+        .settings-close-btn:hover { color: #333; }
+        .settings-modal-body { padding: 16px 20px; }
+        .settings-modal-footer {
+            padding: 12px 20px;
+            border-top: 1px solid #e0e0e0;
+            text-align: right;
+        }
+        .settings-section {
+            margin-bottom: 20px;
+        }
+        .settings-section:last-child { margin-bottom: 0; }
+        .settings-section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #555;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #eee;
+        }
+        .settings-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        .settings-row:last-child { margin-bottom: 0; }
+        .settings-label {
+            font-size: 13px;
+            color: #444;
+            flex-shrink: 0;
+        }
+        .settings-input, .settings-select {
+            padding: 5px 8px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 13px;
+            background: #fff;
+        }
+        .settings-input { width: 200px; }
+        .settings-select { min-width: 160px; }
+        .settings-input:focus, .settings-select:focus {
+            outline: none;
+            border-color: #007bff;
+        }
+
+        /* GoPro pairing status */
+        .gopro-pair-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+            padding: 10px 12px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        .gopro-pair-status .dot {
+            width: 10px; height: 10px; border-radius: 50%;
+        }
+        .gopro-pair-status .dot.green { background: #28a745; }
+        .gopro-pair-status .dot.red { background: #dc3545; }
+        .gopro-pair-status .dot.gray { background: #999; }
+        .gopro-pair-status .label { font-size: 13px; color: #333; flex: 1; }
+        .gopro-pair-status .ip { font-size: 12px; color: #888; font-family: monospace; }
+
+        .btn-settings {
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            font-family: inherit;
+            border: 1px solid #ddd;
+            background: #fff;
+            color: #333;
+            transition: all 0.2s;
+        }
+        .btn-settings:hover { background: #f0f0f0; }
+        .btn-settings.primary { background: #007bff; color: #fff; border-color: #007bff; }
+        .btn-settings.primary:hover { background: #0056b3; }
+        .btn-settings.danger { background: #fff; color: #dc3545; border-color: #dc3545; }
+        .btn-settings.danger:hover { background: #dc3545; color: #fff; }
+        .btn-settings:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Pairing form */
+        .pair-form { display: none; margin-top: 12px; }
+        .pair-form.visible { display: block; }
+        .pair-form-row {
+            margin-bottom: 8px;
+        }
+        .pair-form-row label {
+            display: block;
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 3px;
+        }
+        .pair-form-row input {
+            width: 100%;
+            padding: 7px 10px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 13px;
+        }
+        .pair-form-row input:focus { outline: none; border-color: #007bff; }
+        .pair-form-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        /* Provisioning progress steps */
+        .provision-steps {
+            margin-top: 12px;
+            display: none;
+        }
+        .provision-steps.visible { display: block; }
+        .provision-step {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 5px 0;
+            font-size: 12px;
+            color: #999;
+        }
+        .provision-step .step-icon {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            background: #eee;
+            color: #999;
+            flex-shrink: 0;
+        }
+        .provision-step.active { color: #333; }
+        .provision-step.active .step-icon {
+            background: #007bff;
+            color: #fff;
+            animation: spin 1s linear infinite;
+        }
+        .provision-step.done { color: #28a745; }
+        .provision-step.done .step-icon { background: #28a745; color: #fff; }
+        .provision-step.error { color: #dc3545; }
+        .provision-step.error .step-icon { background: #dc3545; color: #fff; }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .provision-error-msg {
+            display: none;
+            margin-top: 8px;
+            padding: 8px 10px;
+            background: #f8d7da;
+            color: #721c24;
+            border-radius: 6px;
+            font-size: 12px;
+        }
+        .provision-error-msg.visible { display: block; }
+
+        /* Main Layout */
+        .main-container {
+            display: flex;
+            height: calc(100vh - 50px);
+            gap: 0;
+        }
+
+        /* Preview Panel (Left) */
+        .preview-panel {
+            flex: 1;
+            background: #1a1a1a;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+        .preview-header {
+            padding: 8px 15px;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            min-height: 36px;
+        }
+        .preview-header h3 {
+            color: #fff;
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .preview-controls {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .stream-status {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: #888;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #666;
+        }
+        .status-dot.live { background: #00ff00; animation: pulse 1s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+        .preview-image-container {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            position: relative;
+        }
+        .preview-image-container img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+        .preview-placeholder {
+            color: #666;
+            text-align: center;
+        }
+        .preview-placeholder svg {
+            width: 48px;
+            height: 48px;
+            margin-bottom: 8px;
+            opacity: 0.5;
+        }
+        .preview-placeholder p {
+            font-size: 13px;
+        }
+
+        /* Before Image Preview (shown after capture/upload) */
+        .before-preview-container {
+            flex: 1;
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .before-preview-container.visible {
+            display: flex;
+        }
+        .before-image-wrapper {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            position: relative;
+        }
+        .before-image-wrapper img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            cursor: crosshair;
+        }
+        .before-selection-bar {
+            padding: 8px 12px;
+            background: rgba(0,0,0,0.8);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .before-selection-bar .hint {
+            font-size: 12px;
+            color: #aaa;
+            flex: 1;
+        }
+        .before-selection-bar .pixel-count {
+            font-size: 11px;
+            color: #888;
+        }
+        .btn-add-segment {
+            background: linear-gradient(135deg, #28a745, #20c997);
+            color: #fff;
+            border: none;
+            padding: 7px 14px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+        .btn-add-segment:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(40,167,69,0.3); }
+        .btn-add-segment:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+        .btn-clear-segment {
+            background: #444;
+            color: #fff;
+            border: 1px solid #666;
+            padding: 7px 14px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .btn-clear-segment:hover { background: #555; }
+        .btn-back-camera {
+            background: transparent;
+            color: #888;
+            border: 1px solid #555;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .btn-back-camera:hover { color: #fff; border-color: #888; }
+
+        /* Selection mode toggle */
+        .select-mode-toggle {
+            display: flex;
+            background: #333;
+            border-radius: 4px;
+            padding: 1px;
+            gap: 0;
+        }
+        .select-mode-btn {
+            padding: 4px 10px;
+            border: none;
+            background: transparent;
+            color: #888;
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            border-radius: 3px;
+            font-family: inherit;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+        .select-mode-btn.active {
+            background: #0066cc;
+            color: #fff;
+        }
+        .select-mode-btn:hover:not(.active) { color: #ccc; }
+        .result-panel .select-mode-toggle {
+            background: #e9ecef;
+        }
+        .result-panel .select-mode-btn {
+            color: #888;
+        }
+        .result-panel .select-mode-btn.active {
+            background: #0066cc;
+            color: #fff;
+        }
+        .result-panel .select-mode-btn:hover:not(.active) { color: #333; }
+
+        /* Camera Controls Row */
+        .camera-controls {
+            padding: 8px 15px;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            justify-content: center;
+        }
+        .control-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: #fff;
+            font-size: 11px;
+        }
+        .control-item input[type="range"] {
+            width: 80px;
+            accent-color: #0088ff;
+        }
+        .zoom-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 4px;
+            border: 1px solid #555;
+            background: #333;
+            color: #fff;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            line-height: 1;
+        }
+        .zoom-btn:hover { background: #444; }
+        .zoom-btn:active { background: #555; }
+        .control-item select {
+            padding: 4px 6px;
+            border-radius: 4px;
+            border: 1px solid #555;
+            background: #333;
+            color: #fff;
+            font-size: 11px;
+        }
+
+        .capture-bar {
+            padding: 10px 15px;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            align-items: center;
+        }
+        .btn-capture {
+            background: linear-gradient(135deg, #ff4444, #cc0000);
+            color: #fff;
+            border: none;
+            padding: 10px 24px;
+            border-radius: 30px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: transform 0.2s;
+        }
+        .btn-capture:hover { transform: scale(1.05); }
+        .btn-capture svg { width: 18px; height: 18px; }
+
+        .btn-stream {
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .btn-stream.active { background: #0066cc; border-color: #0066cc; }
+
+        /* Result Panel (Right) */
+        .result-panel {
+            flex: 1;
+            background: #fff;
+            display: flex;
+            flex-direction: column;
+            border-left: 1px solid #e0e0e0;
+        }
+        .result-header {
+            padding: 8px 15px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            min-height: 36px;
+        }
+        .result-header h3 {
+            font-size: 13px;
+            font-weight: 500;
+            color: #333;
+        }
+        .timing-badge {
+            font-size: 11px;
+            color: #28a745;
+            font-weight: 500;
+        }
+
+        /* Selection bar for removing from processed */
+        .selection-bar {
+            padding: 6px 12px;
+            background: #fff3cd;
+            border-bottom: 1px solid #ffc107;
+            display: none;
+            align-items: center;
+            gap: 8px;
+        }
+        .selection-bar .hint {
+            font-size: 12px;
+            color: #856404;
+            flex: 1;
+        }
+        .selection-bar .pixel-count {
+            font-size: 11px;
+            color: #666;
+        }
+
+        .result-image-container {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: repeating-conic-gradient(#e8e8e8 0% 25%, #f5f5f5 0% 50%) 50% / 20px 20px;
+            overflow: hidden;
+            position: relative;
+        }
+        .result-image-container img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            cursor: default;
+        }
+        .result-placeholder {
+            color: #999;
+            text-align: center;
+            font-size: 13px;
+        }
+
+        .action-bar {
+            padding: 10px 15px;
+            background: #f8f9fa;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: center;
+            gap: 8px;
+        }
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #0066cc, #0088ff);
+            color: #fff;
+        }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,102,204,0.3); }
+        .btn-secondary {
+            background: #fff;
+            color: #333;
+            border: 1px solid #ddd;
+        }
+        .btn-secondary:hover { background: #f5f5f5; }
+        .btn-success {
+            background: linear-gradient(135deg, #28a745, #20c997);
+            color: #fff;
+        }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        /* Editor Toolbars */
+        .editor-toolbar {
+            display: none;
+            padding: 4px 10px;
+            gap: 2px;
+            align-items: center;
+        }
+        .editor-toolbar.visible { display: flex; }
+        .preview-panel .editor-toolbar {
+            background: rgba(0,0,0,0.7);
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .result-panel .editor-toolbar {
+            background: #ebedf0;
+            border-bottom: 1px solid #ddd;
+        }
+        .toolbar-divider {
+            width: 1px;
+            height: 28px;
+            margin: 0 4px;
+            flex-shrink: 0;
+        }
+        .preview-panel .toolbar-divider { background: rgba(255,255,255,0.15); }
+        .result-panel .toolbar-divider { background: #ccc; }
+        .tool-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 50px;
+            height: 44px;
+            border: 1px solid transparent;
+            border-radius: 6px;
+            background: transparent;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.15s;
+            gap: 1px;
+            padding: 3px 2px;
+        }
+        .tool-btn svg { width: 18px; height: 18px; flex-shrink: 0; }
+        .tool-btn span { font-size: 9px; font-weight: 500; white-space: nowrap; line-height: 1; }
+        .preview-panel .tool-btn { color: #999; }
+        .preview-panel .tool-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+        .preview-panel .tool-btn.active { background: rgba(0,102,204,0.3); border-color: #0077dd; color: #fff; }
+        .result-panel .tool-btn { color: #777; }
+        .result-panel .tool-btn:hover { background: #dde0e5; color: #333; }
+        .result-panel .tool-btn.active { background: #d0ddef; border-color: #0066cc; color: #0066cc; }
+
+        /* Tool options bar */
+        .tool-options {
+            display: none;
+            padding: 5px 12px;
+            align-items: center;
+            gap: 8px;
+        }
+        .tool-options.visible { display: flex; }
+        .preview-panel .tool-options {
+            background: rgba(0,0,0,0.5);
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            color: #ccc;
+        }
+        .result-panel .tool-options {
+            background: #f5f6f8;
+            border-bottom: 1px solid #e0e0e0;
+            color: #555;
+        }
+        .tool-options .opt-hint {
+            font-size: 11px;
+            opacity: 0.7;
+            flex: 1;
+        }
+        .tool-options .opt-count {
+            font-size: 11px;
+            opacity: 0.6;
+        }
+        .opt-btn {
+            padding: 4px 10px;
+            border: none;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 500;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.15s;
+        }
+        .opt-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .opt-btn-primary { background: #0066cc; color: #fff; }
+        .opt-btn-primary:hover:not(:disabled) { background: #0055aa; }
+        .opt-btn-success { background: #28a745; color: #fff; }
+        .opt-btn-success:hover:not(:disabled) { background: #218838; }
+        .opt-btn-muted { background: transparent; border: 1px solid; opacity: 0.6; }
+        .preview-panel .opt-btn-muted { color: #ccc; border-color: #666; }
+        .preview-panel .opt-btn-muted:hover { opacity: 1; }
+        .result-panel .opt-btn-muted { color: #666; border-color: #ccc; }
+        .result-panel .opt-btn-muted:hover { opacity: 1; }
+        .tool-options input[type="range"] { width: 80px; }
+        .tool-options .brush-val { font-size: 11px; min-width: 22px; }
+        .result-panel .tool-options input[type="range"] { accent-color: #dc3545; }
+        .tool-options label { font-size: 12px; font-weight: 500; white-space: nowrap; }
+
+        /* Erase tool overlay canvas */
+        .erase-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            cursor: none;
+            touch-action: none;
+            display: none;
+            z-index: 5;
+        }
+
+        /* Erase brush cursor */
+        .erase-brush-cursor {
+            position: fixed;
+            border: 2px solid rgba(220, 53, 69, 0.9);
+            background: rgba(220, 53, 69, 0.2);
+            border-radius: 50%;
+            pointer-events: none;
+            display: none;
+            z-index: 20;
+            transform: translate(-50%, -50%);
+        }
+
+        /* Loading overlay */
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            z-index: 10;
+        }
+        .loading-overlay.hidden { display: none; }
+        .spinner {
+            width: 36px;
+            height: 36px;
+            border: 3px solid rgba(255,255,255,0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 12px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Hidden file input */
+        #file-input { display: none; }
+
+        /* Upload zone */
+        .upload-zone {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .upload-zone.hidden { display: none; }
+        .drop-area {
+            border: 2px dashed #444;
+            border-radius: 12px;
+            padding: 30px 50px;
+            text-align: center;
+            transition: all 0.3s;
+        }
+        .drop-area:hover, .drop-area.dragover {
+            border-color: #0088ff;
+            background: rgba(0,136,255,0.1);
+        }
+        .drop-area svg {
+            width: 40px;
+            height: 40px;
+            margin-bottom: 10px;
+            opacity: 0.6;
+        }
+        .drop-area p { color: #888; margin-bottom: 10px; font-size: 13px; }
+        .btn-browse {
+            background: #0066cc;
+            color: #fff;
+            padding: 10px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+    </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Background Remover</h1>
-        <p class="subtitle">Remove backgrounds from e-commerce images using AI</p>
+    <!-- Header -->
+    <div class="header">
+        <div class="header-left">
+            <img src="/static/logo.png" alt="Logo" class="logo">
+            <h1>Background Remover</h1>
+        </div>
+        <div class="header-controls">
+            <select id="model-select" class="bg-method-select">
+                <option value="u2netp" selected>U2NetP (Fast)</option>
+                <option value="silueta">Silueta (Fastest)</option>
+                <option value="isnet">ISNet General</option>
+                <option value="u2net">U2Net (Quality)</option>
+            </select>
+            <div id="gopro-status" class="status-badge disconnected">GoPro: Checking...</div>
+            <div class="battery-indicator" id="battery-indicator">
+                <div class="battery-icon"><div class="battery-fill" id="battery-fill"></div></div>
+                <span class="battery-pct" id="battery-pct"></span>
+            </div>
+            <button class="settings-gear" id="settings-btn" title="Settings">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+            </button>
+        </div>
+    </div>
 
-        <!-- Upload Section -->
-        <div id="upload-section" class="section">
-            <!-- GoPro Preview Panel (shown when GoPro connected) -->
-            <div id="gopro-preview-section" class="gopro-preview-section hidden">
+    <!-- Main Container -->
+    <div class="main-container">
+        <!-- Left: Preview/Camera + Before Image -->
+        <div class="preview-panel" id="preview-panel">
+            <!-- Camera stream area (hidden after capture) -->
+            <div id="camera-area">
                 <div class="preview-header">
-                    <h3>GoPro Preview</h3>
+                    <h3>Camera Preview</h3>
                     <div class="preview-controls">
-                        <button id="stream-toggle-btn" class="btn btn-sm btn-stream">Start Stream</button>
-                        <div id="stream-status-indicator" class="stream-status-indicator">
-                            <span class="status-dot"></span>
-                            <span class="status-text">Offline</span>
+                        <div class="stream-status">
+                            <span class="status-dot" id="stream-dot"></span>
+                            <span id="stream-status-text">Offline</span>
                         </div>
                     </div>
                 </div>
-                <div class="preview-container">
-                    <div id="preview-placeholder" class="preview-placeholder">
-                        <svg class="camera-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+
+                <div class="preview-image-container" id="preview-container">
+                    <div class="preview-placeholder" id="preview-placeholder">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <rect x="2" y="6" width="20" height="12" rx="2"/>
                             <circle cx="12" cy="12" r="3"/>
                         </svg>
-                        <p>Click "Start Stream" to begin live preview</p>
+                        <p>Start stream or upload an image</p>
                     </div>
-                    <img id="preview-image" class="preview-image hidden" alt="GoPro Preview">
-                    <img id="stream-feed" class="stream-feed hidden" alt="Live Stream">
+                    <img id="stream-feed" style="display: none;" alt="Live Stream">
                 </div>
-                <div class="camera-controls-row">
-                    <div class="zoom-control-section">
-                        <label for="camera-zoom-slider">Zoom</label>
-                        <div class="zoom-slider-container">
-                            <span class="zoom-label">0%</span>
-                            <input type="range" id="camera-zoom-slider" min="0" max="100" value="0">
-                            <span class="zoom-label">100%</span>
-                        </div>
-                        <span id="camera-zoom-value" class="zoom-value">0%</span>
+
+                <div class="camera-controls" id="camera-controls">
+                    <div class="control-item">
+                        <label>Zoom:</label>
+                        <input type="range" id="camera-zoom" min="0" max="100" value="0">
+                        <span id="zoom-value">0%</span>
                     </div>
-                    <div class="white-balance-section">
-                        <label for="white-balance-select">White Balance</label>
-                        <select id="white-balance-select" class="white-balance-select">
+                    <div class="control-item">
+                        <label>WB:</label>
+                        <select id="white-balance">
                             <option value="0">Auto</option>
-                            <option value="1">2300K (Tungsten)</option>
-                            <option value="2">2800K</option>
+                            <option value="7" selected>5500K</option>
                             <option value="3">3200K</option>
-                            <option value="4">4000K</option>
-                            <option value="5">4500K (Fluorescent)</option>
-                            <option value="6">5000K</option>
-                            <option value="7" selected>5500K (Daylight)</option>
-                            <option value="8">6000K</option>
-                            <option value="9">6500K (Cloudy)</option>
-                            <option value="10">Native</option>
+                            <option value="9">6500K</option>
                         </select>
                     </div>
                 </div>
-                <div class="preview-actions">
-                    <button id="gopro-capture-btn" class="btn btn-gopro btn-large">
-                        <svg class="gopro-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <rect x="2" y="6" width="20" height="12" rx="2"/>
-                            <circle cx="12" cy="12" r="3"/>
-                            <circle cx="18" cy="9" r="1" fill="currentColor"/>
+
+                <div class="capture-bar">
+                    <button id="stream-btn" class="btn-stream">Start Stream</button>
+                    <button id="capture-btn" class="btn-capture">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <circle cx="12" cy="12" r="10"/>
                         </svg>
-                        <span>Capture Photo</span>
+                        Capture
                     </button>
+                    <button id="upload-btn" class="btn-stream">Upload File</button>
                 </div>
-                <p id="gopro-status" class="gopro-status"></p>
             </div>
 
-            <!-- File Drop Zone -->
-            <div id="drop-zone" class="drop-zone">
-                <div class="drop-zone-content">
-                    <svg class="upload-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <!-- Before image preview (shown after capture/upload) -->
+            <div class="before-preview-container" id="before-preview">
+                <div class="preview-header">
+                    <h3>Original Image</h3>
+                </div>
+
+                <div class="editor-toolbar visible" id="before-toolbar">
+                    <button class="tool-btn" id="before-tool-webcam" title="Back to webcam">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="15" height="12" rx="2"/><path d="M17 9l5-3v12l-5-3"/></svg>
+                        <span>Webcam</span>
+                    </button>
+                    <button class="tool-btn" id="before-tool-capture" title="Capture from webcam">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="13" r="4"/><path d="M5 7h2l1.5-2h7L17 7h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2"/></svg>
+                        <span>Capture</span>
+                    </button>
+                    <button class="tool-btn" id="before-tool-upload" title="Upload image file">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        <span>Upload</span>
+                    </button>
+                    <button class="tool-btn" id="before-tool-use-original" title="Skip BG removal — use original photo with watermark" style="display:none;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+                        <span>Use Original</span>
+                    </button>
+                    <div class="toolbar-divider"></div>
+                    <button class="tool-btn active" id="before-tool-sam" title="Click to select areas to add back">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 5V2m0 20v-3M5 12H2m20 0h-3"/></svg>
+                        <span>Add Back</span>
+                    </button>
+                </div>
+
+                <div class="tool-options visible" id="before-sam-options">
+                    <div class="select-mode-toggle" id="before-select-mode">
+                        <button class="select-mode-btn active" data-mode="broad">Broad</button>
+                        <button class="select-mode-btn" data-mode="detail">Detail</button>
+                    </div>
+                    <span class="opt-hint">Click to select areas to add back</span>
+                    <span class="opt-count" id="before-pixel-count"></span>
+                    <button id="add-segment-btn" class="opt-btn opt-btn-success" disabled>Add Segment</button>
+                    <button id="keep-only-before-btn" class="opt-btn opt-btn-primary" disabled>Keep Only This</button>
+                    <button id="clear-segment-btn" class="opt-btn opt-btn-muted">Clear</button>
+                </div>
+
+                <div class="before-image-wrapper" id="before-image-wrapper">
+                    <img id="before-image" alt="Original / Before">
+                    <svg id="before-selection-overlay" style="position: absolute; top: 0; left: 0; pointer-events: none; display: none;"></svg>
+                </div>
+            </div>
+
+            <!-- Upload Zone overlay -->
+            <div class="upload-zone hidden" id="upload-zone">
+                <div class="drop-area" id="drop-area">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                         <polyline points="17 8 12 3 7 8"/>
                         <line x1="12" y1="3" x2="12" y2="15"/>
                     </svg>
                     <p>Drag & drop an image here</p>
-                    <p class="or">or</p>
-                    <button id="browse-btn" class="btn btn-primary">Browse Files</button>
-                    <input type="file" id="file-input" accept="image/*" hidden>
+                    <button class="btn-browse" id="browse-btn">Browse Files</button>
                 </div>
+            </div>
+
+            <div class="loading-overlay hidden" id="preview-loading">
+                <div class="spinner"></div>
+                <span>Processing...</span>
             </div>
         </div>
 
-        <!-- Progress Section -->
-        <div id="progress-section" class="section hidden">
-            <div class="progress-container">
-                <div class="progress-bar">
-                    <div id="progress-fill" class="progress-fill"></div>
-                </div>
-                <p id="progress-text" class="progress-text">Uploading...</p>
-            </div>
-        </div>
-
-        <!-- Results Section -->
-        <div id="results-section" class="section hidden">
-            <!-- Timing Display -->
-            <div id="timing-display" class="timing-display">
-                <h3>Processing Time</h3>
-                <div id="timing-details" class="timing-details"></div>
+        <!-- Right: Result -->
+        <div class="result-panel">
+            <div class="result-header">
+                <h3>Processed Result</h3>
+                <span class="timing-badge" id="timing-badge"></span>
             </div>
 
-            <!-- Main Layout: Images + Sidebar -->
-            <div class="results-layout">
-                <!-- Images Column -->
-                <div class="images-column">
-                    <!-- Comparison View -->
-                    <div class="comparison-container">
-                        <div class="image-panel">
-                            <h3>Original</h3>
-                            <div class="image-wrapper" id="original-wrapper">
-                                <img id="original-image" alt="Original">
-                            </div>
-                        </div>
-                        <div class="image-panel">
-                            <h3>Result</h3>
-                            <div class="image-wrapper white-bg" id="result-wrapper">
-                                <img id="result-image" alt="Result">
-                                <canvas id="paint-canvas" class="paint-canvas hidden"></canvas>
-                                <div id="brush-cursor" class="brush-cursor hidden"></div>
-                            </div>
-                        </div>
-                    </div>
+            <div class="editor-toolbar" id="after-toolbar">
+                <button class="tool-btn" id="after-tool-sam" title="Click to select and remove areas">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 5V2m0 20v-3M5 12H2m20 0h-3"/></svg>
+                    <span>Select</span>
+                </button>
+                <button class="tool-btn" id="after-tool-erase" title="Paint to erase areas">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20H7L3 16l10-10 8 8-5 6z"/><path d="M6 13l8 8"/></svg>
+                    <span>Erase</span>
+                </button>
+                <div class="toolbar-divider"></div>
+                <button class="tool-btn" id="after-tool-zoom" title="Adjust subject size and centering">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/><path d="M8 11h6"/><path d="M11 8v6"/></svg>
+                    <span>Zoom</span>
+                </button>
+                <div class="toolbar-divider"></div>
+                <button class="tool-btn" id="after-tool-undo" title="Undo last edit" disabled>
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+                    <span>Undo</span>
+                </button>
+            </div>
 
-                    <!-- Download Section -->
-                    <div class="download-section">
-                        <div class="download-buttons">
-                            <button id="download-transparent-btn" class="btn btn-primary">
-                                Download (Transparent)
-                            </button>
-                            <button id="download-white-btn" class="btn btn-secondary">
-                                Download (White BG)
-                            </button>
-                            <button id="new-image-btn" class="btn btn-secondary">
-                                New Image
-                            </button>
-                        </div>
-                    </div>
+            <div class="tool-options" id="after-zoom-options">
+                <button class="zoom-btn" id="zoom-minus-btn">&minus;</button>
+                <span class="brush-val" id="zoom-slider-val" style="min-width:36px;text-align:center;">100%</span>
+                <button class="zoom-btn" id="zoom-plus-btn">+</button>
+                <button id="zoom-reset-btn" class="opt-btn opt-btn-muted" style="margin-left:8px;">Reset</button>
+                <span class="opt-hint">Subject zoomed &amp; centered on 2048&times;2048 canvas</span>
+            </div>
+
+            <div class="tool-options" id="after-sam-options">
+                <div class="select-mode-toggle" id="result-select-mode">
+                    <button class="select-mode-btn active" data-mode="broad">Broad</button>
+                    <button class="select-mode-btn" data-mode="detail">Detail</button>
                 </div>
+                <span class="opt-hint" id="selection-hint">Click on unwanted areas to select, then remove</span>
+                <span class="opt-count" id="selection-count"></span>
+                <button id="remove-selection-btn" class="opt-btn opt-btn-primary">Remove Selected</button>
+                <button id="keep-only-after-btn" class="opt-btn opt-btn-success">Keep Only This</button>
+                <button id="clear-selection-btn" class="opt-btn opt-btn-muted">Clear</button>
+            </div>
 
-                <!-- Controls Sidebar -->
-                <div class="controls-sidebar">
-                    <!-- Adjustment Controls -->
-                    <div class="controls-section">
-                        <h3>Adjustments</h3>
+            <div class="tool-options" id="after-erase-options">
+                <label>Brush:</label>
+                <input type="range" id="erase-brush-slider" min="5" max="50" value="20">
+                <span class="brush-val" id="erase-brush-val">20</span>
+                <button id="apply-erase-btn" class="opt-btn opt-btn-primary">Apply Erase</button>
+                <button id="cancel-erase-btn" class="opt-btn opt-btn-muted">Cancel</button>
+            </div>
 
-                        <!-- Sensitivity Slider -->
-                        <div class="control-group">
-                            <label for="sensitivity-slider">Edge Hardness</label>
-                            <div class="slider-container">
-                                <span class="slider-label">Soft</span>
-                                <input type="range" id="sensitivity-slider" min="0" max="100" value="50">
-                                <span class="slider-label">Hard</span>
-                            </div>
-                            <span id="sensitivity-value" class="slider-value">50</span>
-                        </div>
-
-                        <!-- Manual Painting Controls -->
-                        <div class="control-group">
-                            <label>Manual Corrections</label>
-                            <div class="paint-controls">
-                                <button id="keep-btn" class="btn btn-keep btn-sm">Keep</button>
-                                <button id="remove-btn" class="btn btn-remove btn-sm">Remove</button>
-                                <button id="clear-paint-btn" class="btn btn-secondary btn-sm">Clear</button>
-                            </div>
-                            <div class="brush-size-control">
-                                <label for="brush-size">Brush:</label>
-                                <input type="range" id="brush-size" min="5" max="50" value="15">
-                                <span id="brush-size-value">15</span>
-                            </div>
-                        </div>
-
-                        <!-- Apply Button -->
-                        <button id="apply-btn" class="btn btn-primary btn-full">Apply Adjustments</button>
-                    </div>
-
-                    <!-- Color Correction -->
-                    <div class="controls-section">
-                        <h3>Color Correction</h3>
-                        <p class="section-description">Adjust white balance after capture</p>
-
-                        <div class="control-group">
-                            <label>Temperature</label>
-                            <div class="preset-buttons">
-                                <button class="btn btn-preset" data-type="temperature" data-value="-60">Cool</button>
-                                <button class="btn btn-preset" data-type="temperature" data-value="-30">Cooler</button>
-                                <button class="btn btn-preset" data-type="temperature" data-value="30">Warmer</button>
-                                <button class="btn btn-preset" data-type="temperature" data-value="60">Warm</button>
-                            </div>
-                        </div>
-
-                        <div class="control-group">
-                            <label>Tint</label>
-                            <div class="preset-buttons">
-                                <button class="btn btn-preset" data-type="tint" data-value="-40">Green</button>
-                                <button class="btn btn-preset" data-type="tint" data-value="40">Magenta</button>
-                            </div>
-                        </div>
-
-                        <div class="control-group">
-                            <label>Brightness</label>
-                            <div class="preset-buttons">
-                                <button class="btn btn-preset" data-type="brightness" data-value="-30">Darker</button>
-                                <button class="btn btn-preset" data-type="brightness" data-value="-15">Dim</button>
-                                <button class="btn btn-preset" data-type="brightness" data-value="15">Bright</button>
-                                <button class="btn btn-preset" data-type="brightness" data-value="30">Brighter</button>
-                            </div>
-                        </div>
-
-                        <button id="reset-colors-btn" class="btn btn-secondary btn-full" style="margin-top: 12px;">Reset Colors</button>
-                    </div>
-
-                    <!-- Subject Zoom & Position -->
-                    <div class="controls-section">
-                        <h3>Subject Zoom & Position</h3>
-                        <p class="section-description">Enlarge and center the subject</p>
-
-                        <div class="control-group">
-                            <label>Zoom Level</label>
-                            <div class="slider-container">
-                                <span class="slider-label">1x</span>
-                                <input type="range" id="subject-zoom-slider" min="100" max="300" value="100" step="10">
-                                <span class="slider-label">3x</span>
-                            </div>
-                            <span id="subject-zoom-value" class="slider-value">100%</span>
-                        </div>
-
-                        <div class="button-row">
-                            <button id="reset-image-btn" class="btn btn-secondary">Reset</button>
-                            <button id="recenter-btn" class="btn btn-secondary">Recenter</button>
-                            <button id="apply-zoom-btn" class="btn btn-primary">Zoom</button>
-                        </div>
-                    </div>
-
-                    <!-- Fullscreen Edit -->
-                    <div class="controls-section">
-                        <button id="fullscreen-btn" class="btn btn-secondary btn-full">
-                            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-                            </svg>
-                            Fullscreen Edit
-                        </button>
-                    </div>
+            <div class="result-image-container" id="result-container">
+                <div class="result-placeholder" id="result-placeholder">
+                    Capture or upload an image to see result
                 </div>
+                <img id="result-image" style="display: none;" alt="Result">
+                <svg id="selection-overlay" style="position: absolute; top: 0; left: 0; pointer-events: none; display: none;"></svg>
+                <canvas id="erase-canvas" class="erase-canvas"></canvas>
+            </div>
+            <div id="erase-brush-cursor" class="erase-brush-cursor"></div>
+
+            <div class="action-bar">
+                <button id="download-btn" class="btn btn-success" disabled>Download (White BG)</button>
+                <button id="download-transparent-btn" class="btn btn-secondary" disabled>Download (Transparent)</button>
+                <button id="new-btn" class="btn btn-secondary" disabled>New Image</button>
+            </div>
+
+            <div class="loading-overlay hidden" id="result-loading">
+                <div class="spinner"></div>
+                <span id="loading-text">Removing background...</span>
             </div>
         </div>
     </div>
 
-    <!-- Fullscreen Edit Modal -->
-    <div id="fullscreen-modal" class="fullscreen-modal hidden">
-        <div class="fullscreen-header">
-            <h2>Edit Mode</h2>
-            <div class="fullscreen-controls">
-                <div class="paint-controls">
-                    <button id="fs-keep-btn" class="btn btn-keep btn-sm">Keep</button>
-                    <button id="fs-remove-btn" class="btn btn-remove btn-sm">Remove</button>
-                    <button id="fs-clear-btn" class="btn btn-secondary btn-sm">Clear</button>
+    <input type="file" id="file-input" accept="image/*">
+
+    <!-- Settings Modal -->
+    <div class="settings-overlay" id="settings-overlay">
+        <div class="settings-modal">
+            <div class="settings-modal-header">
+                <h2>Settings</h2>
+                <button class="settings-close-btn" id="settings-close-btn">&times;</button>
+            </div>
+            <div class="settings-modal-body">
+                <!-- GoPro Camera Section -->
+                <div class="settings-section">
+                    <div class="settings-section-title">GoPro Camera</div>
+                    <div class="gopro-pair-status" id="settings-gopro-status">
+                        <span class="dot gray" id="settings-gopro-dot"></span>
+                        <span class="label" id="settings-gopro-label">Checking...</span>
+                        <span class="ip" id="settings-gopro-ip"></span>
+                    </div>
+                    <div id="settings-gopro-actions">
+                        <button class="btn-settings primary" id="settings-pair-btn" style="display:none;">Pair GoPro</button>
+                        <button class="btn-settings danger" id="settings-forget-btn" style="display:none;">Forget Pairing</button>
+                    </div>
+
+                    <!-- Pairing Form -->
+                    <div class="pair-form" id="pair-form">
+                        <div class="pair-form-row">
+                            <label for="pair-ssid">WiFi Network Name (SSID)</label>
+                            <input type="text" id="pair-ssid" placeholder="Your WiFi network name">
+                        </div>
+                        <div class="pair-form-row">
+                            <label for="pair-password">WiFi Password</label>
+                            <input type="password" id="pair-password" placeholder="WiFi password">
+                        </div>
+                        <div class="pair-form-row">
+                            <label for="pair-identifier">Camera ID (optional, last 4 of serial)</label>
+                            <input type="text" id="pair-identifier" placeholder="e.g. A1B2" maxlength="4">
+                        </div>
+                        <div class="pair-form-actions">
+                            <button class="btn-settings primary" id="start-pair-btn">Start Pairing</button>
+                            <button class="btn-settings" id="cancel-pair-btn">Cancel</button>
+                        </div>
+                    </div>
+
+                    <!-- Provisioning Progress -->
+                    <div class="provision-steps" id="provision-steps">
+                        <div class="provision-step" data-step="connecting_ble">
+                            <span class="step-icon">&#9679;</span>
+                            <span>Connecting via Bluetooth...</span>
+                        </div>
+                        <div class="provision-step" data-step="setting_time">
+                            <span class="step-icon">&#9679;</span>
+                            <span>Setting camera date/time...</span>
+                        </div>
+                        <div class="provision-step" data-step="scanning_wifi">
+                            <span class="step-icon">&#9679;</span>
+                            <span>Scanning WiFi networks...</span>
+                        </div>
+                        <div class="provision-step" data-step="connecting_wifi">
+                            <span class="step-icon">&#9679;</span>
+                            <span>Connecting to WiFi...</span>
+                        </div>
+                        <div class="provision-step" data-step="creating_cert">
+                            <span class="step-icon">&#9679;</span>
+                            <span>Creating security certificate...</span>
+                        </div>
+                        <div class="provision-step" data-step="getting_credentials">
+                            <span class="step-icon">&#9679;</span>
+                            <span>Getting credentials...</span>
+                        </div>
+                        <div class="provision-step" data-step="complete">
+                            <span class="step-icon">&#10003;</span>
+                            <span>Complete!</span>
+                        </div>
+                    </div>
+                    <div class="provision-error-msg" id="provision-error-msg"></div>
                 </div>
-                <div class="brush-size-control">
-                    <label>Brush:</label>
-                    <input type="range" id="fs-brush-size" min="5" max="100" value="15">
-                    <span id="fs-brush-size-value">15</span>
-                </div>
-                <div class="zoom-control">
-                    <label>Zoom:</label>
-                    <input type="range" id="fs-zoom-slider" min="100" max="500" value="100" step="25">
-                    <span id="fs-zoom-value">100%</span>
+
+                <!-- Camera Defaults Section -->
+                <div class="settings-section">
+                    <div class="settings-section-title">Camera Defaults</div>
+                    <div class="settings-row">
+                        <span class="settings-label">Default Zoom</span>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <input type="range" id="settings-zoom" min="0" max="100" value="0" style="width:120px;">
+                            <span id="settings-zoom-val" style="font-size:12px;color:#888;min-width:30px;">0%</span>
+                        </div>
+                    </div>
+                    <div class="settings-row">
+                        <span class="settings-label">Default White Balance</span>
+                        <select class="settings-select" id="settings-wb">
+                            <option value="0">Auto</option>
+                            <option value="1">2300K</option>
+                            <option value="2">2800K</option>
+                            <option value="3">3200K</option>
+                            <option value="4">4000K</option>
+                            <option value="5">4500K</option>
+                            <option value="6">5000K</option>
+                            <option value="7">5500K</option>
+                            <option value="8">6000K</option>
+                            <option value="9">6500K</option>
+                            <option value="10">Native</option>
+                        </select>
+                    </div>
+                    <div class="settings-row">
+                        <span class="settings-label">BG Removal Model</span>
+                        <select class="settings-select" id="settings-model">
+                            <option value="u2netp">U2NetP (Fast)</option>
+                            <option value="silueta">Silueta (Fastest)</option>
+                            <option value="isnet">ISNet General</option>
+                            <option value="u2net">U2Net (Quality)</option>
+                        </select>
+                    </div>
                 </div>
             </div>
-            <div class="fullscreen-actions">
-                <button id="fs-recenter-btn" class="btn btn-secondary">Recenter</button>
-                <button id="fs-preview-btn" class="btn btn-secondary">Preview</button>
-                <button id="fs-apply-btn" class="btn btn-primary">Apply & Close</button>
-                <button id="fs-close-btn" class="btn btn-secondary">Cancel</button>
-            </div>
-        </div>
-        <div class="fullscreen-canvas-container" id="fs-canvas-container">
-            <div class="fullscreen-image-wrapper" id="fs-image-wrapper">
-                <img id="fs-result-image" alt="Edit">
-                <canvas id="fs-paint-canvas" class="paint-canvas"></canvas>
-                <div id="fs-brush-cursor" class="brush-cursor hidden"></div>
+            <div class="settings-modal-footer">
+                <button class="btn-settings" id="settings-done-btn">Close</button>
             </div>
         </div>
     </div>
 
-    <script src="/static/app.js"></script>
+    <script>
+        // State
+        let currentImageId = null;
+        let streaming = false;
+        let goproConnected = false;
+        let hasBeforeSelection = false;
+        let hasProcessedSelection = false;
+        let beforeSelectMode = 'broad';   // 'broad' or 'detail'
+        let resultSelectMode = 'broad';   // 'broad' or 'detail'
+        let afterActiveTool = null;       // null, 'sam', 'erase', or 'zoom'
+        let subjectZoom = 100;            // 50-150, controls subject size in 2048 square
+        let hasUndo = false;
+        let useOriginalMode = false;
+
+        function resultImageUrl(imageId) {
+            if (useOriginalMode) {
+                return `/image/original-white/${imageId}?t=${Date.now()}`;
+            }
+            return `/image/adjusted-white/${imageId}?t=${Date.now()}&zoom=${subjectZoom}`;
+        }
+
+        // Elements - Header
+        const modelSelect = document.getElementById('model-select');
+        const goproStatusBadge = document.getElementById('gopro-status');
+
+        // Elements - Camera area
+        const cameraArea = document.getElementById('camera-area');
+        const streamBtn = document.getElementById('stream-btn');
+        const captureBtn = document.getElementById('capture-btn');
+        const uploadBtn = document.getElementById('upload-btn');
+        const streamFeed = document.getElementById('stream-feed');
+        const streamDot = document.getElementById('stream-dot');
+        const streamStatusText = document.getElementById('stream-status-text');
+        const previewPlaceholder = document.getElementById('preview-placeholder');
+        const cameraZoom = document.getElementById('camera-zoom');
+        const zoomValue = document.getElementById('zoom-value');
+        const whiteBalance = document.getElementById('white-balance');
+
+        // Elements - Before image preview
+        const beforePreview = document.getElementById('before-preview');
+        const beforeImage = document.getElementById('before-image');
+        const beforeImageWrapper = document.getElementById('before-image-wrapper');
+        const beforeSelectionOverlay = document.getElementById('before-selection-overlay');
+        const beforePixelCount = document.getElementById('before-pixel-count');
+        const addSegmentBtn = document.getElementById('add-segment-btn');
+        const keepOnlyBeforeBtn = document.getElementById('keep-only-before-btn');
+        const clearSegmentBtn = document.getElementById('clear-segment-btn');
+
+        // Elements - Toolbars
+        const afterToolbar = document.getElementById('after-toolbar');
+
+        // Elements - Result panel
+        const resultImage = document.getElementById('result-image');
+        const resultPlaceholder = document.getElementById('result-placeholder');
+        const resultContainer = document.getElementById('result-container');
+        const timingBadge = document.getElementById('timing-badge');
+        const downloadBtn = document.getElementById('download-btn');
+        const downloadTransparentBtn = document.getElementById('download-transparent-btn');
+        const newBtn = document.getElementById('new-btn');
+        const resultLoading = document.getElementById('result-loading');
+        const loadingText = document.getElementById('loading-text');
+        const selectionOverlay = document.getElementById('selection-overlay');
+        const removeSelectionBtn = document.getElementById('remove-selection-btn');
+        const keepOnlyAfterBtn = document.getElementById('keep-only-after-btn');
+        const clearSelectionBtn = document.getElementById('clear-selection-btn');
+        const selectionCount = document.getElementById('selection-count');
+        const selectionHint = document.getElementById('selection-hint');
+        const undoBtn = document.getElementById('after-tool-undo');
+
+        // Elements - Other
+        const fileInput = document.getElementById('file-input');
+        const uploadZone = document.getElementById('upload-zone');
+        const dropArea = document.getElementById('drop-area');
+
+        // Elements - Battery
+        const batteryIndicator = document.getElementById('battery-indicator');
+        const batteryFill = document.getElementById('battery-fill');
+        const batteryPct = document.getElementById('battery-pct');
+
+        // ==================== GoPro Status ====================
+
+        function updateBattery(pct, charging) {
+            if (pct == null) {
+                batteryIndicator.classList.remove('visible');
+                return;
+            }
+            batteryIndicator.classList.add('visible');
+            batteryFill.style.width = pct + '%';
+            batteryPct.textContent = pct + '%';
+            batteryIndicator.classList.remove('low', 'medium', 'charging');
+            if (charging) batteryIndicator.classList.add('charging');
+            if (pct <= 20) batteryIndicator.classList.add('low');
+            else if (pct <= 50) batteryIndicator.classList.add('medium');
+        }
+
+        async function checkGoPro() {
+            try {
+                const res = await fetch('/gopro/status');
+                const data = await res.json();
+                const wasConnected = goproConnected;
+                goproConnected = data.connected;
+                if (data.connected) {
+                    goproStatusBadge.textContent = 'GoPro: Connected';
+                    goproStatusBadge.className = 'status-badge connected';
+                    updateBattery(data.battery_percent, data.battery_charging);
+                    // Auto-start stream when camera first detected as connected
+                    if (!streaming && !wasConnected && !streamBtn.disabled) {
+                        setTimeout(() => streamBtn.click(), 500);
+                    }
+                } else {
+                    goproStatusBadge.textContent = 'GoPro: Disconnected';
+                    goproStatusBadge.className = 'status-badge disconnected';
+                    updateBattery(null);
+                }
+            } catch (e) {
+                goproStatusBadge.textContent = 'GoPro: Error';
+                goproStatusBadge.className = 'status-badge disconnected';
+                updateBattery(null);
+            }
+        }
+
+        // ==================== Selection Mode Toggles ====================
+
+        document.querySelectorAll('#before-select-mode .select-mode-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('#before-select-mode .select-mode-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                beforeSelectMode = btn.dataset.mode;
+            });
+        });
+
+        document.querySelectorAll('#result-select-mode .select-mode-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('#result-select-mode .select-mode-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                resultSelectMode = btn.dataset.mode;
+            });
+        });
+
+        // ==================== Stream Controls ====================
+
+        streamBtn.addEventListener('click', async () => {
+            if (streaming) {
+                await fetch('/gopro/stream/stop', { method: 'POST' });
+                streaming = false;
+                streamBtn.textContent = 'Start Stream';
+                streamBtn.classList.remove('active');
+                streamFeed.style.display = 'none';
+                previewPlaceholder.style.display = 'block';
+                streamDot.classList.remove('live');
+                streamStatusText.textContent = 'Offline';
+            } else {
+                streamBtn.disabled = true;
+                streamBtn.textContent = 'Starting...';
+                try {
+                    const res = await fetch('/gopro/stream/start', { method: 'POST' });
+                    const data = await res.json();
+                    if (data.success) {
+                        streaming = true;
+                        streamBtn.textContent = 'Stop Stream';
+                        streamBtn.classList.add('active');
+                        streamFeed.src = '/gopro/stream/feed?' + Date.now();
+                        streamFeed.style.display = 'block';
+                        previewPlaceholder.style.display = 'none';
+                        streamDot.classList.add('live');
+                        streamStatusText.textContent = 'Live';
+                        // Apply saved camera settings (zoom, white balance)
+                        applyCameraSettings();
+                    } else {
+                        streamBtn.textContent = 'Start Stream';
+                        streamStatusText.textContent = data.error || 'Stream failed';
+                    }
+                } catch (e) {
+                    streamBtn.textContent = 'Start Stream';
+                    streamStatusText.textContent = 'Connection error';
+                }
+                streamBtn.disabled = false;
+            }
+        });
+
+        // ==================== Capture ====================
+
+        captureBtn.addEventListener('click', async () => {
+            resultLoading.classList.remove('hidden');
+            loadingText.textContent = 'Capturing and processing...';
+
+            const formData = new FormData();
+            formData.append('model', modelSelect.value);
+
+            try {
+                let res;
+                if (streaming) {
+                    res = await fetch('/gopro/stream/snapshot', { method: 'POST', body: formData });
+                } else {
+                    res = await fetch('/gopro/capture', { method: 'POST', body: formData });
+                }
+                const data = await res.json();
+
+                if (data.success || data.image_id) {
+                    currentImageId = data.image_id;
+                    showResult(data);
+                } else {
+                    alert(data.error || 'Capture failed');
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+
+            resultLoading.classList.add('hidden');
+        });
+
+        // ==================== Upload ====================
+
+        uploadBtn.addEventListener('click', () => fileInput.click());
+        document.getElementById('browse-btn').addEventListener('click', () => fileInput.click());
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length > 0) uploadFile(fileInput.files[0]);
+        });
+
+        dropArea.addEventListener('dragover', (e) => { e.preventDefault(); dropArea.classList.add('dragover'); });
+        dropArea.addEventListener('dragleave', () => dropArea.classList.remove('dragover'));
+        dropArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropArea.classList.remove('dragover');
+            if (e.dataTransfer.files.length > 0) uploadFile(e.dataTransfer.files[0]);
+        });
+
+        async function uploadFile(file) {
+            resultLoading.classList.remove('hidden');
+            loadingText.textContent = 'Uploading and processing...';
+
+            const formData = new FormData();
+            formData.append('image', file);
+            formData.append('model', modelSelect.value);
+
+            try {
+                const res = await fetch('/upload', { method: 'POST', body: formData });
+                const data = await res.json();
+
+                if (data.success) {
+                    currentImageId = data.image_id;
+                    showResult(data);
+                } else {
+                    alert(data.error || 'Upload failed');
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+
+            resultLoading.classList.add('hidden');
+        }
+
+        // ==================== Show Result ====================
+
+        function showResult(data) {
+            const t = Date.now();
+
+            // Reset useOriginalMode unless this call came from "Use Original"
+            if (!data.use_original) {
+                useOriginalMode = false;
+            }
+
+            // Show processed result on right panel
+            resultImage.src = resultImageUrl(data.image_id);
+            resultImage.style.display = 'block';
+            resultPlaceholder.style.display = 'none';
+
+            // Show original/before image on left panel
+            beforeImage.src = `/image/original/${data.image_id}?t=${t}`;
+            showBeforePreview();
+
+            // Show "Use Original" button now that we have an image
+            useOriginalBtn.style.display = '';
+
+            // Show timing
+            if (data.timings && !useOriginalMode) {
+                timingBadge.textContent = `${data.timings.remove_bg}ms (${data.timings.method || modelSelect.value})`;
+            }
+
+            // Enable buttons
+            downloadBtn.disabled = false;
+            newBtn.disabled = false;
+
+            if (useOriginalMode) {
+                // Hide transparent download (no transparency), change white-bg label
+                downloadTransparentBtn.style.display = 'none';
+                downloadBtn.textContent = 'Download';
+                // Hide after-toolbar (no Select/Erase/Zoom/Undo for originals)
+                afterToolbar.classList.remove('visible');
+                deactivateAfterTool();
+                // Show Use Original button as active
+                useOriginalBtn.style.display = '';
+                // Show timing as "Original"
+                timingBadge.textContent = 'Original (no BG removal)';
+            } else {
+                downloadTransparentBtn.disabled = false;
+                downloadTransparentBtn.style.display = '';
+                downloadBtn.textContent = 'Download (White BG)';
+                // Show after-image toolbar
+                afterToolbar.classList.add('visible');
+                deactivateAfterTool();
+            }
+
+            // Reset zoom and undo for new image
+            subjectZoom = 100;
+            hasUndo = false;
+            undoBtn.disabled = true;
+
+            // Clear any previous selections
+            clearBeforeSelection();
+            clearProcessedSelection();
+        }
+
+        // ==================== Before/After Panel Switching ====================
+
+        function showBeforePreview() {
+            cameraArea.style.display = 'none';
+            beforePreview.classList.add('visible');
+        }
+
+        function showCameraArea() {
+            beforePreview.classList.remove('visible');
+            cameraArea.style.display = '';
+            // Reconnect the MJPEG stream — the old connection times out
+            // while the camera area is hidden during image editing
+            if (streaming) {
+                streamFeed.src = '/gopro/stream/feed?' + Date.now();
+            }
+        }
+
+        // ==================== Before Image Toolbar Actions ====================
+
+        document.getElementById('before-tool-webcam').addEventListener('click', () => {
+            showCameraArea();
+        });
+
+        document.getElementById('before-tool-capture').addEventListener('click', () => {
+            captureBtn.click();
+        });
+
+        document.getElementById('before-tool-upload').addEventListener('click', () => {
+            fileInput.click();
+        });
+
+        const useOriginalBtn = document.getElementById('before-tool-use-original');
+        useOriginalBtn.addEventListener('click', async () => {
+            if (!currentImageId) return;
+            resultLoading.classList.remove('hidden');
+            loadingText.textContent = 'Using original...';
+            try {
+                const res = await fetch('/use_original', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image_id: currentImageId })
+                });
+                const data = await res.json();
+                if (data.error) { alert(data.error); return; }
+                useOriginalMode = true;
+                showResult(data);
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+            resultLoading.classList.add('hidden');
+        });
+
+        // ==================== Before Image Segmentation ====================
+
+        beforeImage.addEventListener('click', async (e) => {
+            if (!currentImageId) return;
+
+            const rect = beforeImage.getBoundingClientRect();
+            const scaleX = beforeImage.naturalWidth / rect.width;
+            const scaleY = beforeImage.naturalHeight / rect.height;
+            const x = Math.round((e.clientX - rect.left) * scaleX);
+            const y = Math.round((e.clientY - rect.top) * scaleY);
+
+            try {
+                const res = await fetch('/select_color', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        image_id: currentImageId,
+                        x: x,
+                        y: y,
+                        mode: 'original',
+                        select_mode: beforeSelectMode
+                    })
+                });
+                const data = await res.json();
+
+                if (data.success && data.contours && data.contours.length > 0) {
+                    showBeforeSelectionOutline(data.contours);
+                    hasBeforeSelection = true;
+                    addSegmentBtn.disabled = false;
+                    keepOnlyBeforeBtn.disabled = false;
+                    if (data.area) {
+                        beforePixelCount.textContent = `(${data.area.toLocaleString()} px)`;
+                    }
+                } else {
+                    console.log('No segment found at click point');
+                }
+            } catch (err) {
+                console.error('Selection error:', err);
+            }
+        });
+
+        function showBeforeSelectionOutline(contours) {
+            const img = beforeImage;
+            const rect = img.getBoundingClientRect();
+            const wrapperRect = beforeImageWrapper.getBoundingClientRect();
+
+            beforeSelectionOverlay.style.left = (rect.left - wrapperRect.left) + 'px';
+            beforeSelectionOverlay.style.top = (rect.top - wrapperRect.top) + 'px';
+            beforeSelectionOverlay.style.width = rect.width + 'px';
+            beforeSelectionOverlay.style.height = rect.height + 'px';
+            beforeSelectionOverlay.style.display = 'block';
+
+            const scaleX = rect.width / img.naturalWidth;
+            const scaleY = rect.height / img.naturalHeight;
+
+            let pathData = '';
+            contours.forEach(contour => {
+                if (contour.length > 0) {
+                    pathData += 'M ' + (contour[0][0] * scaleX) + ' ' + (contour[0][1] * scaleY) + ' ';
+                    for (let i = 1; i < contour.length; i++) {
+                        pathData += 'L ' + (contour[i][0] * scaleX) + ' ' + (contour[i][1] * scaleY) + ' ';
+                    }
+                    pathData += 'Z ';
+                }
+            });
+
+            beforeSelectionOverlay.innerHTML = `
+                <path d="${pathData}"
+                      fill="rgba(0, 170, 0, 0.25)"
+                      stroke="#00cc00"
+                      stroke-width="2"
+                      stroke-dasharray="6,3"
+                      stroke-linecap="round"/>
+            `;
+        }
+
+        function clearBeforeSelection() {
+            beforeSelectionOverlay.innerHTML = '';
+            beforeSelectionOverlay.style.display = 'none';
+            hasBeforeSelection = false;
+            addSegmentBtn.disabled = true;
+            keepOnlyBeforeBtn.disabled = true;
+            beforePixelCount.textContent = '';
+
+            // Also clear server-side mask
+            if (currentImageId) {
+                fetch('/clear_selection', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image_id: currentImageId })
+                });
+            }
+        }
+
+        // Add Segment to Result
+        addSegmentBtn.addEventListener('click', async () => {
+            if (!currentImageId || !hasBeforeSelection) return;
+
+            resultLoading.classList.remove('hidden');
+            loadingText.textContent = 'Adding segment to result...';
+
+            try {
+                const res = await fetch('/add_selection', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image_id: currentImageId })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    // Refresh the processed result
+                    resultImage.src = resultImageUrl(currentImageId);
+                    clearBeforeSelection();
+                    hasUndo = true;
+                    undoBtn.disabled = false;
+                } else {
+                    alert(data.error || 'Failed to add segment');
+                }
+            } catch (err) {
+                alert('Error: ' + err.message);
+            }
+
+            resultLoading.classList.add('hidden');
+        });
+
+        // Keep Only This (before/original panel)
+        keepOnlyBeforeBtn.addEventListener('click', async () => {
+            if (!currentImageId || !hasBeforeSelection) return;
+            resultLoading.classList.remove('hidden');
+            loadingText.textContent = 'Keeping only selected segment...';
+            try {
+                const res = await fetch('/keep_only_selection', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image_id: currentImageId, mode: 'original' })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    resultImage.src = resultImageUrl(currentImageId);
+                    clearBeforeSelection();
+                    hasUndo = true;
+                    undoBtn.disabled = false;
+                } else {
+                    alert(data.error || 'Failed to keep selection');
+                }
+            } catch (err) {
+                alert('Error: ' + err.message);
+            }
+            resultLoading.classList.add('hidden');
+        });
+
+        clearSegmentBtn.addEventListener('click', () => clearBeforeSelection());
+
+        // ==================== Processed Image Selection (Remove) ====================
+
+        resultImage.addEventListener('click', async (e) => {
+            if (!currentImageId || afterActiveTool !== 'sam') return;
+
+            const rect = resultImage.getBoundingClientRect();
+            const scaleX = resultImage.naturalWidth / rect.width;
+            const scaleY = resultImage.naturalHeight / rect.height;
+            const x = Math.round((e.clientX - rect.left) * scaleX);
+            const y = Math.round((e.clientY - rect.top) * scaleY);
+
+            try {
+                const res = await fetch('/select_color', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        image_id: currentImageId,
+                        x: x,
+                        y: y,
+                        tolerance: 50,
+                        select_mode: resultSelectMode,
+                        zoom: subjectZoom
+                    })
+                });
+                const data = await res.json();
+
+                if (data.success && data.contours && data.contours.length > 0) {
+                    showProcessedSelectionOutline(data.contours);
+                    hasProcessedSelection = true;
+                    if (data.area) {
+                        selectionCount.textContent = `(${data.area.toLocaleString()} px)`;
+                    }
+                }
+            } catch (err) {
+                console.error('Selection error:', err);
+            }
+        });
+
+        function showProcessedSelectionOutline(contours) {
+            const img = resultImage;
+            const rect = img.getBoundingClientRect();
+            const containerRect = resultContainer.getBoundingClientRect();
+
+            selectionOverlay.style.left = (rect.left - containerRect.left) + 'px';
+            selectionOverlay.style.top = (rect.top - containerRect.top) + 'px';
+            selectionOverlay.style.width = rect.width + 'px';
+            selectionOverlay.style.height = rect.height + 'px';
+            selectionOverlay.style.display = 'block';
+
+            const scaleX = rect.width / img.naturalWidth;
+            const scaleY = rect.height / img.naturalHeight;
+
+            let pathData = '';
+            contours.forEach(contour => {
+                if (contour.length > 0) {
+                    pathData += 'M ' + (contour[0][0] * scaleX) + ' ' + (contour[0][1] * scaleY) + ' ';
+                    for (let i = 1; i < contour.length; i++) {
+                        pathData += 'L ' + (contour[i][0] * scaleX) + ' ' + (contour[i][1] * scaleY) + ' ';
+                    }
+                    pathData += 'Z ';
+                }
+            });
+
+            selectionOverlay.innerHTML = `
+                <path d="${pathData}"
+                      fill="rgba(255, 0, 0, 0.2)"
+                      stroke="#ff0000"
+                      stroke-width="2"
+                      stroke-dasharray="5,5"
+                      stroke-linecap="round"/>
+            `;
+        }
+
+        function clearProcessedSelection() {
+            selectionOverlay.innerHTML = '';
+            selectionOverlay.style.display = 'none';
+            hasProcessedSelection = false;
+            selectionCount.textContent = '';
+        }
+
+        // Remove selection from processed
+        removeSelectionBtn.addEventListener('click', async () => {
+            if (!currentImageId || !hasProcessedSelection) return;
+
+            resultLoading.classList.remove('hidden');
+            loadingText.textContent = 'Removing selection...';
+
+            try {
+                const res = await fetch('/remove_selection', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image_id: currentImageId })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    resultImage.src = resultImageUrl(currentImageId);
+                    clearProcessedSelection();
+                    hasUndo = true;
+                    undoBtn.disabled = false;
+                } else {
+                    alert(data.error || 'Failed to remove selection');
+                }
+            } catch (err) {
+                alert('Error: ' + err.message);
+            }
+
+            resultLoading.classList.add('hidden');
+        });
+
+        // Keep Only This (after/processed panel)
+        keepOnlyAfterBtn.addEventListener('click', async () => {
+            if (!currentImageId || !hasProcessedSelection) return;
+            resultLoading.classList.remove('hidden');
+            loadingText.textContent = 'Keeping only selected segment...';
+            try {
+                const res = await fetch('/keep_only_selection', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image_id: currentImageId, mode: 'processed' })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    resultImage.src = resultImageUrl(currentImageId);
+                    clearProcessedSelection();
+                    hasUndo = true;
+                    undoBtn.disabled = false;
+                } else {
+                    alert(data.error || 'Failed to keep selection');
+                }
+            } catch (err) {
+                alert('Error: ' + err.message);
+            }
+            resultLoading.classList.add('hidden');
+        });
+
+        clearSelectionBtn.addEventListener('click', async () => {
+            if (!currentImageId) return;
+
+            await fetch('/clear_selection', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image_id: currentImageId })
+            });
+
+            clearProcessedSelection();
+        });
+
+        // ==================== After Panel Tool Switching ====================
+
+        const eraseCanvas = document.getElementById('erase-canvas');
+        const eraseCtx = eraseCanvas.getContext('2d');
+        const eraseBrushCursor = document.getElementById('erase-brush-cursor');
+        const eraseBrushSlider = document.getElementById('erase-brush-slider');
+        const eraseBrushVal = document.getElementById('erase-brush-val');
+        const applyEraseBtn = document.getElementById('apply-erase-btn');
+        const cancelEraseBtn = document.getElementById('cancel-erase-btn');
+
+        let eraseMode = false;
+        let isErasing = false;
+        let erasePoints = [];
+        let eraseBrushSize = 20;
+
+        document.getElementById('after-tool-sam').addEventListener('click', () => setAfterTool('sam'));
+        document.getElementById('after-tool-erase').addEventListener('click', () => setAfterTool('erase'));
+        document.getElementById('after-tool-zoom').addEventListener('click', () => setAfterTool('zoom'));
+        applyEraseBtn.addEventListener('click', () => applyErase());
+        cancelEraseBtn.addEventListener('click', () => deactivateAfterTool());
+
+        undoBtn.addEventListener('click', async () => {
+            if (!currentImageId || !hasUndo) return;
+            resultLoading.classList.remove('hidden');
+            loadingText.textContent = 'Undoing...';
+            try {
+                const res = await fetch('/undo', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ image_id: currentImageId })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    resultImage.src = resultImageUrl(currentImageId);
+                    hasUndo = false;
+                    undoBtn.disabled = true;
+                    clearProcessedSelection();
+                }
+            } catch (err) {
+                console.error('Undo error:', err);
+            }
+            resultLoading.classList.add('hidden');
+        });
+
+        eraseBrushSlider.addEventListener('input', () => {
+            eraseBrushSize = parseInt(eraseBrushSlider.value);
+            eraseBrushVal.textContent = eraseBrushSize;
+            updateEraseCursorSize();
+        });
+
+        // Zoom +/- buttons
+        const zoomSliderVal = document.getElementById('zoom-slider-val');
+        const SUBJECT_ZOOM_STEP = 10;
+
+        function applySubjectZoom(newZoom) {
+            subjectZoom = Math.max(50, Math.min(150, newZoom));
+            zoomSliderVal.textContent = subjectZoom + '%';
+            if (currentImageId) {
+                resultImage.src = resultImageUrl(currentImageId);
+            }
+        }
+
+        document.getElementById('zoom-plus-btn').addEventListener('click', () => {
+            applySubjectZoom(subjectZoom + SUBJECT_ZOOM_STEP);
+        });
+        document.getElementById('zoom-minus-btn').addEventListener('click', () => {
+            applySubjectZoom(subjectZoom - SUBJECT_ZOOM_STEP);
+        });
+
+        document.getElementById('zoom-reset-btn').addEventListener('click', () => {
+            applySubjectZoom(100);
+        });
+
+        function setAfterTool(tool) {
+            // Toggle off if clicking the already-active tool
+            if (afterActiveTool === tool) {
+                deactivateAfterTool();
+                return;
+            }
+
+            // Deactivate current tool first
+            deactivateAfterTool();
+
+            // Activate new tool
+            afterActiveTool = tool;
+            document.getElementById('after-tool-' + tool).classList.add('active');
+
+            if (tool === 'sam') {
+                document.getElementById('after-sam-options').classList.add('visible');
+                resultImage.style.cursor = 'crosshair';
+            } else if (tool === 'erase') {
+                document.getElementById('after-erase-options').classList.add('visible');
+                enterEraseMode();
+            } else if (tool === 'zoom') {
+                document.getElementById('after-zoom-options').classList.add('visible');
+                zoomSliderVal.textContent = subjectZoom + '%';
+            }
+        }
+
+        function deactivateAfterTool() {
+            if (afterActiveTool === 'sam') {
+                clearProcessedSelection();
+            } else if (afterActiveTool === 'erase') {
+                exitEraseMode();
+            }
+
+            document.querySelectorAll('#after-toolbar .tool-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById('after-sam-options').classList.remove('visible');
+            document.getElementById('after-erase-options').classList.remove('visible');
+            document.getElementById('after-zoom-options').classList.remove('visible');
+
+            resultImage.style.cursor = '';
+            resultImage.style.pointerEvents = '';
+            afterActiveTool = null;
+        }
+
+        // ==================== Erase Tool ====================
+
+        function enterEraseMode() {
+            eraseMode = true;
+            erasePoints = [];
+            setupEraseCanvas();
+            eraseCanvas.style.display = 'block';
+            updateEraseCursorSize();
+            resultImage.style.pointerEvents = 'none';
+        }
+
+        function exitEraseMode() {
+            eraseMode = false;
+            isErasing = false;
+            erasePoints = [];
+            eraseCanvas.style.display = 'none';
+            eraseBrushCursor.style.display = 'none';
+            eraseCtx.clearRect(0, 0, eraseCanvas.width, eraseCanvas.height);
+            resultImage.style.pointerEvents = '';
+        }
+
+        function updateEraseCursorSize() {
+            eraseBrushCursor.style.width = (eraseBrushSize * 2) + 'px';
+            eraseBrushCursor.style.height = (eraseBrushSize * 2) + 'px';
+        }
+
+        function setupEraseCanvas() {
+            const img = resultImage;
+            const rect = img.getBoundingClientRect();
+            const containerRect = resultContainer.getBoundingClientRect();
+
+            eraseCanvas.width = rect.width;
+            eraseCanvas.height = rect.height;
+            eraseCanvas.style.left = (rect.left - containerRect.left) + 'px';
+            eraseCanvas.style.top = (rect.top - containerRect.top) + 'px';
+            eraseCanvas.style.width = rect.width + 'px';
+            eraseCanvas.style.height = rect.height + 'px';
+
+            eraseCtx.clearRect(0, 0, eraseCanvas.width, eraseCanvas.height);
+        }
+
+        function getEraseCoords(e) {
+            const rect = eraseCanvas.getBoundingClientRect();
+            return {
+                x: e.clientX - rect.left,
+                y: e.clientY - rect.top,
+                clientX: e.clientX,
+                clientY: e.clientY
+            };
+        }
+
+        function startErase(e) {
+            if (!eraseMode) return;
+            isErasing = true;
+            const coords = getEraseCoords(e);
+            erasePoints.push([coords.x, coords.y]);
+            drawErasePoint(coords.x, coords.y);
+        }
+
+        function doErase(e) {
+            if (!eraseMode || !isErasing) return;
+            const coords = getEraseCoords(e);
+            erasePoints.push([coords.x, coords.y]);
+            drawErasePoint(coords.x, coords.y);
+        }
+
+        function stopErase() {
+            isErasing = false;
+        }
+
+        function drawErasePoint(x, y) {
+            eraseCtx.beginPath();
+            eraseCtx.arc(x, y, eraseBrushSize, 0, Math.PI * 2);
+            eraseCtx.fillStyle = 'rgba(220, 53, 69, 0.35)';
+            eraseCtx.fill();
+        }
+
+        function updateEraseCursor(e) {
+            if (!eraseMode) return;
+            eraseBrushCursor.style.display = 'block';
+            eraseBrushCursor.style.left = e.clientX + 'px';
+            eraseBrushCursor.style.top = e.clientY + 'px';
+        }
+
+        // Mouse events on erase canvas
+        eraseCanvas.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            startErase(e);
+        });
+        eraseCanvas.addEventListener('mousemove', (e) => {
+            updateEraseCursor(e);
+            doErase(e);
+        });
+        eraseCanvas.addEventListener('mouseup', () => stopErase());
+        eraseCanvas.addEventListener('mouseleave', () => {
+            stopErase();
+            eraseBrushCursor.style.display = 'none';
+        });
+        eraseCanvas.addEventListener('mouseenter', (e) => {
+            if (eraseMode) updateEraseCursor(e);
+        });
+
+        // Touch events on erase canvas
+        eraseCanvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            startErase(touch);
+            updateEraseCursor(touch);
+        }, { passive: false });
+        eraseCanvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            doErase(touch);
+            updateEraseCursor(touch);
+        }, { passive: false });
+        eraseCanvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            stopErase();
+            eraseBrushCursor.style.display = 'none';
+        });
+
+        async function applyErase() {
+            if (!currentImageId || erasePoints.length === 0) {
+                deactivateAfterTool();
+                return;
+            }
+
+            resultLoading.classList.remove('hidden');
+            loadingText.textContent = 'Applying erase...';
+
+            // Scale points from display coords to natural image size
+            const img = resultImage;
+            const canvasW = eraseCanvas.width;
+            const canvasH = eraseCanvas.height;
+            const scaleX = img.naturalWidth / canvasW;
+            const scaleY = img.naturalHeight / canvasH;
+
+            const scaledPoints = erasePoints.map(p => [
+                Math.round(p[0] * scaleX),
+                Math.round(p[1] * scaleY)
+            ]);
+
+            const scaledBrush = Math.round(eraseBrushSize * Math.max(scaleX, scaleY));
+
+            try {
+                const res = await fetch('/adjust', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        image_id: currentImageId,
+                        mask_data: {
+                            remove: scaledPoints,
+                            brushSize: scaledBrush
+                        },
+                        original_size: [img.naturalWidth, img.naturalHeight],
+                        zoom: subjectZoom
+                    })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    resultImage.src = resultImageUrl(currentImageId);
+                    hasUndo = true;
+                    undoBtn.disabled = false;
+                } else {
+                    alert(data.error || 'Erase failed');
+                }
+            } catch (err) {
+                alert('Error: ' + err.message);
+            }
+
+            deactivateAfterTool();
+            resultLoading.classList.add('hidden');
+        }
+
+        // Re-setup erase canvas on window resize
+        window.addEventListener('resize', () => {
+            if (eraseMode) setupEraseCanvas();
+        });
+
+        // ==================== Download ====================
+
+        downloadBtn.addEventListener('click', () => {
+            if (!currentImageId) return;
+            if (useOriginalMode) {
+                window.location.href = `/download/${currentImageId}?background=original`;
+            } else {
+                window.location.href = `/download/${currentImageId}?background=white&zoom=${subjectZoom}`;
+            }
+        });
+
+        downloadTransparentBtn.addEventListener('click', () => {
+            if (currentImageId) window.location.href = `/download/${currentImageId}?background=transparent&zoom=${subjectZoom}`;
+        });
+
+        // ==================== New Image ====================
+
+        newBtn.addEventListener('click', () => {
+            currentImageId = null;
+            useOriginalMode = false;
+            resultImage.style.display = 'none';
+            resultPlaceholder.style.display = 'block';
+            timingBadge.textContent = '';
+            downloadBtn.disabled = true;
+            downloadBtn.textContent = 'Download (White BG)';
+            downloadTransparentBtn.disabled = true;
+            downloadTransparentBtn.style.display = '';
+            newBtn.disabled = true;
+            hasUndo = false;
+            undoBtn.disabled = true;
+            useOriginalBtn.style.display = 'none';
+            deactivateAfterTool();
+            afterToolbar.classList.remove('visible');
+            clearProcessedSelection();
+            clearBeforeSelection();
+            showCameraArea();
+        });
+
+        // ==================== Camera Controls ====================
+
+        cameraZoom.addEventListener('input', () => {
+            zoomValue.textContent = cameraZoom.value + '%';
+        });
+        cameraZoom.addEventListener('change', async () => {
+            zoomValue.textContent = cameraZoom.value + '%';
+            await fetch('/gopro/zoom', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ percent: cameraZoom.value })
+            });
+            // FFmpeg restarts for zoom — reconnect the MJPEG feed
+            if (streaming) {
+                streamFeed.src = '/gopro/stream/feed?' + Date.now();
+            }
+        });
+
+        whiteBalance.addEventListener('change', async () => {
+            await fetch('/gopro/white_balance', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ option: whiteBalance.value })
+            });
+        });
+
+        // ==================== Settings / localStorage Persistence ====================
+
+        const SETTINGS_KEY = 'kaizen_settings';
+
+        function loadSettings() {
+            const saved = localStorage.getItem(SETTINGS_KEY);
+            return saved ? JSON.parse(saved) : {
+                cameraZoom: 0,
+                whiteBalance: '7',
+                bgModel: 'u2netp'
+            };
+        }
+
+        function saveSettings(settings) {
+            localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        }
+
+        function applySettings(settings) {
+            // Apply to main UI controls
+            modelSelect.value = settings.bgModel;
+            cameraZoom.value = settings.cameraZoom || 0;
+            zoomValue.textContent = (settings.cameraZoom || 0) + '%';
+            whiteBalance.value = settings.whiteBalance;
+
+            // Apply to settings modal controls
+            document.getElementById('settings-zoom').value = settings.cameraZoom || 0;
+            document.getElementById('settings-zoom-val').textContent = (settings.cameraZoom || 0) + '%';
+            document.getElementById('settings-wb').value = settings.whiteBalance;
+            document.getElementById('settings-model').value = settings.bgModel;
+        }
+
+        async function applyCameraSettings() {
+            // Camera settings (zoom, WB) can't be changed during webcam mode
+            // on most GoPro models — skip to avoid disrupting the stream.
+        }
+
+        // Settings modal elements
+        const settingsBtn = document.getElementById('settings-btn');
+        const settingsOverlay = document.getElementById('settings-overlay');
+        const settingsCloseBtn = document.getElementById('settings-close-btn');
+        const settingsDoneBtn = document.getElementById('settings-done-btn');
+        const settingsZoom = document.getElementById('settings-zoom');
+        const settingsZoomVal = document.getElementById('settings-zoom-val');
+        const settingsWb = document.getElementById('settings-wb');
+        const settingsModel = document.getElementById('settings-model');
+
+        settingsZoom.addEventListener('input', () => {
+            settingsZoomVal.textContent = settingsZoom.value + '%';
+        });
+
+        // GoPro pairing elements
+        const settingsGoproDot = document.getElementById('settings-gopro-dot');
+        const settingsGoproLabel = document.getElementById('settings-gopro-label');
+        const settingsGoproIp = document.getElementById('settings-gopro-ip');
+        const settingsPairBtn = document.getElementById('settings-pair-btn');
+        const settingsForgetBtn = document.getElementById('settings-forget-btn');
+        const pairForm = document.getElementById('pair-form');
+        const startPairBtn = document.getElementById('start-pair-btn');
+        const cancelPairBtn = document.getElementById('cancel-pair-btn');
+        const provisionSteps = document.getElementById('provision-steps');
+        const provisionErrorMsg = document.getElementById('provision-error-msg');
+
+        function openSettings() {
+            // Load current settings into modal
+            const settings = loadSettings();
+            settingsZoom.value = settings.cameraZoom || 0;
+            settingsZoomVal.textContent = (settings.cameraZoom || 0) + '%';
+            settingsWb.value = settings.whiteBalance;
+            settingsModel.value = settings.bgModel;
+
+            // Reset pairing UI
+            pairForm.classList.remove('visible');
+            provisionSteps.classList.remove('visible');
+            provisionErrorMsg.classList.remove('visible');
+
+            // Fetch GoPro status
+            refreshGoproSettingsStatus();
+
+            settingsOverlay.classList.add('visible');
+        }
+
+        function closeSettings() {
+            // Save settings from modal
+            const settings = {
+                cameraZoom: parseInt(settingsZoom.value),
+                whiteBalance: settingsWb.value,
+                bgModel: settingsModel.value
+            };
+            saveSettings(settings);
+            applySettings(settings);
+
+            settingsOverlay.classList.remove('visible');
+        }
+
+        async function refreshGoproSettingsStatus() {
+            try {
+                const res = await fetch('/settings');
+                const data = await res.json();
+                const gopro = data.gopro;
+
+                if (gopro.paired) {
+                    // Also check live connection
+                    const statusRes = await fetch('/gopro/status');
+                    const statusData = await statusRes.json();
+
+                    if (statusData.connected) {
+                        settingsGoproDot.className = 'dot green';
+                        settingsGoproLabel.textContent = 'Connected';
+                    } else {
+                        settingsGoproDot.className = 'dot red';
+                        settingsGoproLabel.textContent = 'Paired (Offline)';
+                    }
+                    settingsGoproIp.textContent = gopro.ip_address || '';
+                    settingsPairBtn.style.display = 'none';
+                    settingsForgetBtn.style.display = '';
+                } else {
+                    settingsGoproDot.className = 'dot gray';
+                    settingsGoproLabel.textContent = 'Not Paired';
+                    settingsGoproIp.textContent = '';
+                    settingsPairBtn.style.display = '';
+                    settingsForgetBtn.style.display = 'none';
+                }
+            } catch (e) {
+                settingsGoproDot.className = 'dot red';
+                settingsGoproLabel.textContent = 'Error checking status';
+                settingsGoproIp.textContent = '';
+            }
+        }
+
+        settingsBtn.addEventListener('click', openSettings);
+        settingsCloseBtn.addEventListener('click', closeSettings);
+        settingsDoneBtn.addEventListener('click', closeSettings);
+        settingsOverlay.addEventListener('click', (e) => {
+            if (e.target === settingsOverlay) closeSettings();
+        });
+
+        // GoPro Pairing
+        settingsPairBtn.addEventListener('click', () => {
+            pairForm.classList.add('visible');
+            settingsPairBtn.style.display = 'none';
+        });
+
+        cancelPairBtn.addEventListener('click', () => {
+            pairForm.classList.remove('visible');
+            settingsPairBtn.style.display = '';
+        });
+
+        settingsForgetBtn.addEventListener('click', async () => {
+            if (!confirm('Remove GoPro pairing? You will need to re-pair to use the camera.')) return;
+            try {
+                const res = await fetch('/gopro/forget', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    refreshGoproSettingsStatus();
+                    checkGoPro();
+                } else {
+                    alert('Failed to remove pairing: ' + (data.error || 'Unknown error'));
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        });
+
+        startPairBtn.addEventListener('click', () => {
+            const ssid = document.getElementById('pair-ssid').value.trim();
+            const password = document.getElementById('pair-password').value.trim();
+            const identifier = document.getElementById('pair-identifier').value.trim();
+
+            if (!ssid || !password) {
+                alert('WiFi SSID and password are required.');
+                return;
+            }
+
+            startPairing(ssid, password, identifier);
+        });
+
+        const PROVISION_STEP_ORDER = [
+            'connecting_ble', 'setting_time', 'scanning_wifi',
+            'connecting_wifi', 'creating_cert', 'getting_credentials', 'complete'
+        ];
+
+        async function startPairing(ssid, password, identifier) {
+            // Show progress, hide form
+            pairForm.classList.remove('visible');
+            provisionSteps.classList.add('visible');
+            provisionErrorMsg.classList.remove('visible');
+            startPairBtn.disabled = true;
+
+            // Reset all steps
+            provisionSteps.querySelectorAll('.provision-step').forEach(el => {
+                el.className = 'provision-step';
+            });
+
+            try {
+                const res = await fetch('/gopro/provision', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ssid, password, identifier })
+                });
+                const data = await res.json();
+                if (!res.ok) {
+                    showProvisionError(data.error || 'Failed to start provisioning');
+                    startPairBtn.disabled = false;
+                    return;
+                }
+
+                // Start SSE polling
+                const evtSource = new EventSource('/gopro/provision/status');
+                evtSource.onmessage = (event) => {
+                    const status = JSON.parse(event.data);
+                    updateProvisionSteps(status);
+
+                    if (status.done) {
+                        evtSource.close();
+                        startPairBtn.disabled = false;
+
+                        if (status.error) {
+                            showProvisionError(status.error);
+                        } else {
+                            // Success — refresh status
+                            refreshGoproSettingsStatus();
+                            checkGoPro();
+                        }
+                    }
+                };
+                evtSource.onerror = () => {
+                    evtSource.close();
+                    startPairBtn.disabled = false;
+                    showProvisionError('Lost connection to server during provisioning.');
+                };
+            } catch (e) {
+                showProvisionError(e.message);
+                startPairBtn.disabled = false;
+            }
+        }
+
+        function updateProvisionSteps(status) {
+            const currentStep = status.step;
+            const currentIdx = PROVISION_STEP_ORDER.indexOf(currentStep);
+
+            provisionSteps.querySelectorAll('.provision-step').forEach(el => {
+                const stepName = el.dataset.step;
+                const stepIdx = PROVISION_STEP_ORDER.indexOf(stepName);
+
+                if (status.error && stepName === currentStep) {
+                    el.className = 'provision-step error';
+                } else if (stepIdx < currentIdx) {
+                    el.className = 'provision-step done';
+                } else if (stepIdx === currentIdx) {
+                    el.className = currentStep === 'complete' ? 'provision-step done' : 'provision-step active';
+                } else {
+                    el.className = 'provision-step';
+                }
+            });
+        }
+
+        function showProvisionError(msg) {
+            provisionErrorMsg.textContent = msg;
+            provisionErrorMsg.classList.add('visible');
+        }
+
+        // ==================== Initialize ====================
+
+        // Load and apply saved settings
+        const savedSettings = loadSettings();
+        applySettings(savedSettings);
+
+        checkGoPro();
+        setInterval(checkGoPro, 10000);
+    </script>
 </body>
 </html>

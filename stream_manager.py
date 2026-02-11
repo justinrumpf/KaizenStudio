@@ -36,6 +36,8 @@ class StreamManager:
         self.status = "stopped"
         self.error_message = ""
 
+        self.zoom_percent = 0  # 0 = no zoom, 100 = 2x zoom
+
         self.ffmpeg_path = shutil.which('ffmpeg')
 
     def _init_session(self) -> bool:
@@ -57,6 +59,50 @@ class StreamManager:
         except Exception as e:
             self.error_message = str(e)
             return False
+
+    def _reset_webcam_state(self):
+        """Aggressively reset webcam state. Handles camera stuck in bad state."""
+        # Try normal stop -> exit
+        for endpoint in ["/gopro/webcam/stop", "/gopro/webcam/exit",
+                         "/gopro/camera/stream/stop"]:
+            try:
+                self._gopro_request(endpoint, timeout=3)
+                print(f"  {endpoint} -> OK")
+            except Exception as e:
+                print(f"  {endpoint} -> {e}")
+
+        time.sleep(1)
+
+        # Check if webcam is actually off
+        try:
+            status = self._gopro_request("/gopro/webcam/status", timeout=3)
+            wc_status = status.get("status", -1)
+            print(f"  Webcam status after cleanup: {wc_status}")
+            # Status 0 = OFF, anything else means stuck
+            if wc_status != 0:
+                print("  Camera stuck — forcing preset switch to reset...")
+                # Switch to video preset group to force camera out of webcam
+                try:
+                    self._gopro_request("/gopro/camera/presets/set_group?id=1000", timeout=5)
+                    print("  Preset switch -> OK")
+                except Exception as e2:
+                    print(f"  Preset switch -> {e2}")
+                time.sleep(2)
+                # Try exit again
+                try:
+                    self._gopro_request("/gopro/webcam/exit", timeout=3)
+                except:
+                    pass
+                time.sleep(1)
+        except Exception as e:
+            print(f"  Status check -> {e}")
+            # If even status fails, try the preset switch as last resort
+            try:
+                self._gopro_request("/gopro/camera/presets/set_group?id=1000", timeout=5)
+                print("  Forced preset switch -> OK")
+                time.sleep(2)
+            except:
+                pass
 
     def _gopro_request(self, endpoint: str, timeout: int = 10) -> dict:
         if self.session is None:
@@ -86,21 +132,22 @@ class StreamManager:
                 self.status = "error"
                 return False
 
-            # Stop any existing webcam/stream
+            # Fully reset webcam state
             print("Cleaning up...")
-            try:
-                self._gopro_request("/gopro/webcam/stop", timeout=3)
-            except:
-                pass
-            try:
-                self._gopro_request("/gopro/camera/stream/stop", timeout=3)
-            except:
-                pass
-            time.sleep(0.5)
+            self._reset_webcam_state()
 
             # Start FFmpeg listener FIRST on port 8554
             print("Starting FFmpeg on UDP port 8554...")
             self._start_ffmpeg()
+
+            # Verify FFmpeg actually started (port bind can fail)
+            time.sleep(0.5)
+            if self.ffmpeg_process and self.ffmpeg_process.poll() is not None:
+                self.error_message = "FFmpeg failed to start (port 8554 may be in use)"
+                self.status = "error"
+                print(f"FFmpeg exited immediately with code {self.ffmpeg_process.returncode}")
+                self.ffmpeg_process = None
+                return False
 
             # Start webcam mode
             print("Starting webcam mode...")
@@ -125,11 +172,31 @@ class StreamManager:
                 self.status = "live"
                 print(f"Stream is live! Frames: {self.frame_count}")
                 return True
-            else:
-                print("No frames received yet, but stream may be starting...")
+
+            # Check if FFmpeg is still running
+            if self.ffmpeg_process and self.ffmpeg_process.poll() is None:
+                # FFmpeg alive but no frames yet — give it more time
+                print("Waiting longer for frames...")
+                for i in range(50):  # 5 more seconds
+                    time.sleep(0.1)
+                    if self.frame_count > 0:
+                        break
+
+            if self.frame_count > 0:
                 self.streaming = True
                 self.status = "live"
+                print(f"Stream is live! Frames: {self.frame_count}")
                 return True
+            else:
+                self.error_message = "No frames received from camera"
+                self.status = "error"
+                print("Stream failed: no frames received")
+                self._stop_ffmpeg()
+                try:
+                    self._gopro_request("/gopro/webcam/stop", timeout=3)
+                except:
+                    pass
+                return False
 
         except Exception as e:
             self.error_message = str(e)
@@ -138,7 +205,30 @@ class StreamManager:
             self._stop_ffmpeg()
             return False
 
+    def _free_udp_port(self, port: int = 8554):
+        """Kill any process holding the UDP port (orphaned FFmpeg from prior run)."""
+        try:
+            result = subprocess.run(
+                ['netstat', '-ano', '-p', 'UDP'],
+                capture_output=True, text=True, timeout=5
+            )
+            for line in result.stdout.splitlines():
+                if f':{port} ' in line or f':{port}\t' in line:
+                    parts = line.split()
+                    pid = parts[-1]
+                    if pid.isdigit() and int(pid) != 0:
+                        print(f"Killing orphaned process on UDP port {port} (PID {pid})")
+                        subprocess.run(['taskkill', '/F', '/PID', pid],
+                                       capture_output=True, timeout=5)
+        except Exception as e:
+            print(f"Port cleanup warning: {e}")
+
     def _start_ffmpeg(self):
+        # Kill our own stale process reference first
+        self._stop_ffmpeg()
+        # Free port 8554 in case an orphaned FFmpeg survived a Flask restart
+        self._free_udp_port(8554)
+
         # Webcam streams on UDP port 8554!
         cmd = [
             self.ffmpeg_path,
@@ -151,6 +241,21 @@ class StreamManager:
             '-i', 'udp://0.0.0.0:8554?overrun_nonfatal=1&fifo_size=50000000',
             '-map', '0:v:0',
             '-an',
+        ]
+
+        # Software zoom: crop center of frame and scale back to 1920x1080
+        if self.zoom_percent > 0:
+            # zoom 0% = 1.0x, zoom 100% = 2.0x
+            scale = 1.0 + self.zoom_percent / 100.0
+            crop_w = int(1920 / scale)
+            crop_h = int(1080 / scale)
+            # Ensure even dimensions for encoder
+            crop_w = crop_w - (crop_w % 2)
+            crop_h = crop_h - (crop_h % 2)
+            cmd += ['-vf', f'crop={crop_w}:{crop_h},scale=1920:1080']
+            print(f"FFmpeg zoom: {self.zoom_percent}% -> crop {crop_w}x{crop_h}, scale to 1920x1080")
+
+        cmd += [
             '-f', 'mjpeg',
             '-q:v', '5',
             'pipe:1'
@@ -251,6 +356,10 @@ class StreamManager:
             self._gopro_request("/gopro/webcam/stop", timeout=5)
         except:
             pass
+        try:
+            self._gopro_request("/gopro/webcam/exit", timeout=3)
+        except:
+            pass
 
         with self.frame_lock:
             self.current_frame = None
@@ -277,47 +386,27 @@ class StreamManager:
         return path
 
     def set_zoom(self, percent: int) -> bool:
-        if not self.session and not self._init_session():
-            print(f"Zoom failed: no session")
-            return False
-        try:
-            percent = max(0, min(100, percent))
-            print(f"Setting zoom to {percent}%...")
+        """Software zoom via FFmpeg crop. Restarts FFmpeg only, webcam keeps streaming."""
+        percent = max(0, min(100, percent))
+        if percent == self.zoom_percent:
+            return True
 
-            # Try webcam zoom endpoint first (some firmware versions)
-            try:
-                result = self._gopro_request(f"/gopro/webcam/zoom?percent={percent}", timeout=3)
-                print(f"Webcam zoom result: {result}")
-                return True
-            except Exception as e1:
-                print(f"Webcam zoom not available: {e1}")
+        print(f"Setting software zoom to {percent}% (was {self.zoom_percent}%)...")
+        self.zoom_percent = percent
 
-            # Try standard digital zoom (may need to briefly exit webcam mode)
-            if self.streaming:
-                # Stop webcam, set zoom, restart
-                print("Stopping webcam to change zoom...")
-                try:
-                    self._gopro_request("/gopro/webcam/stop", timeout=3)
-                except:
-                    pass
-                time.sleep(0.3)
+        # If streaming, restart FFmpeg with new crop params (webcam stays running)
+        if self.streaming:
+            self._stop_ffmpeg()
+            time.sleep(0.3)
+            self._start_ffmpeg()
+            # Wait briefly for frames to resume
+            for i in range(20):
+                time.sleep(0.1)
+                if self.frame_count > 0 and self.current_frame:
+                    break
+            print(f"Zoom applied. Frames: {self.frame_count}")
 
-                result = self._gopro_request(f"/gopro/camera/digital_zoom?percent={percent}")
-                print(f"Digital zoom result: {result}")
-
-                # Restart webcam
-                print("Restarting webcam...")
-                self._gopro_request("/gopro/webcam/start", timeout=10)
-                return True
-            else:
-                result = self._gopro_request(f"/gopro/camera/digital_zoom?percent={percent}")
-                print(f"Digital zoom result: {result}")
-                return True
-
-        except Exception as e:
-            self.error_message = str(e)
-            print(f"Zoom error: {e}")
-            return False
+        return True
 
     def set_setting(self, setting_id: int, option_id: int) -> bool:
         """Set a GoPro camera setting."""
@@ -327,30 +416,27 @@ class StreamManager:
         try:
             print(f"Setting {setting_id} to option {option_id}...")
 
-            # If streaming, need to stop webcam first
+            # Settings require fully exiting webcam mode (stop alone gives 403)
             was_streaming = self.streaming
             if was_streaming:
-                print("Pausing webcam to change setting...")
+                print("Exiting webcam mode to change setting...")
                 try:
-                    self._gopro_request("/gopro/webcam/stop", timeout=3)
+                    self._gopro_request("/gopro/webcam/exit", timeout=5)
                 except:
                     pass
-                time.sleep(0.3)
+                time.sleep(0.5)
 
             result = self._gopro_request(f"/gopro/camera/setting?setting={setting_id}&option={option_id}")
             print(f"Setting result: {result}")
 
-            # Restart webcam if it was running
             if was_streaming:
                 print("Restarting webcam...")
-                time.sleep(0.3)
                 self._gopro_request("/gopro/webcam/start", timeout=10)
 
             return True
         except Exception as e:
             self.error_message = str(e)
             print(f"Setting error: {e}")
-            # Try to restart webcam if we stopped it
             if self.streaming:
                 try:
                     self._gopro_request("/gopro/webcam/start", timeout=10)
