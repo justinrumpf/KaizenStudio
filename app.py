@@ -16,7 +16,10 @@ from flask import Flask, render_template, request, jsonify, send_file, Response
 from rembg import remove, new_session
 from skimage.measure import label, regionprops
 from scipy.ndimage import gaussian_filter
+import ssl
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.ssl_ import create_urllib3_context
 
 # Force ONNX Runtime to use CPU only (suppress TensorRT/CUDA warnings)
 os.environ["ORT_TENSORRT_UNAVAILABLE"] = "1"
@@ -269,6 +272,28 @@ provision_status = {
 provision_lock = threading.Lock()
 
 
+class GoProSSLAdapter(HTTPAdapter):
+    """HTTPS adapter that uses a custom SSL context for GoPro's self-signed certs.
+
+    GoPro COHN certificates may lack the Authority Key Identifier extension,
+    which causes Python's default SSL verification to reject them.  This adapter
+    builds a permissive-but-pinned context: it loads the camera's cert as the
+    only trusted CA and skips hostname checking (the camera is reached by IP).
+    """
+
+    def __init__(self, cert_file: str, **kwargs):
+        self._cert_file = cert_file
+        super().__init__(**kwargs)
+
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = create_urllib3_context()
+        ctx.load_verify_locations(self._cert_file)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_REQUIRED
+        kwargs["ssl_context"] = ctx
+        return super().init_poolmanager(*args, **kwargs)
+
+
 def init_gopro_session():
     """Initialize GoPro HTTPS session with credentials."""
     global gopro_session, gopro_config
@@ -281,11 +306,9 @@ def init_gopro_session():
             gopro_config = json.load(f)
 
         gopro_session = requests.Session()
-        gopro_session.verify = str(GOPRO_CERT_FILE)
         gopro_session.auth = (gopro_config["username"], gopro_config["password"])
 
-        # Configure connection pooling
-        adapter = requests.adapters.HTTPAdapter(pool_connections=1, pool_maxsize=1)
+        adapter = GoProSSLAdapter(str(GOPRO_CERT_FILE), pool_connections=1, pool_maxsize=1)
         gopro_session.mount("https://", adapter)
 
         return True, "GoPro session initialized"

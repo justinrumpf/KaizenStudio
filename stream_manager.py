@@ -6,12 +6,31 @@ Uses GoPro webcam mode which streams MPEG-TS over UDP port 8554.
 
 import json
 import shutil
+import ssl
 import subprocess
 import threading
 import time
 from pathlib import Path
 from typing import Optional
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.ssl_ import create_urllib3_context
+
+
+class _GoProSSLAdapter(HTTPAdapter):
+    """HTTPS adapter with custom SSL context for GoPro self-signed certs."""
+
+    def __init__(self, cert_file: str, **kwargs):
+        self._cert_file = cert_file
+        super().__init__(**kwargs)
+
+    def init_poolmanager(self, *args, **kwargs):
+        ctx = create_urllib3_context()
+        ctx.load_verify_locations(self._cert_file)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_REQUIRED
+        kwargs["ssl_context"] = ctx
+        return super().init_poolmanager(*args, **kwargs)
 
 
 class StreamManager:
@@ -50,10 +69,11 @@ class StreamManager:
                 self.config = json.load(f)
 
             self.session = requests.Session()
-            self.session.verify = str(self.cert_file)
             self.session.auth = (self.config["username"], self.config["password"])
 
-            adapter = requests.adapters.HTTPAdapter(pool_connections=1, pool_maxsize=1)
+            # Use custom SSL context — GoPro self-signed certs may lack
+            # the Authority Key Identifier extension that Python expects.
+            adapter = _GoProSSLAdapter(str(self.cert_file), pool_connections=1, pool_maxsize=1)
             self.session.mount("https://", adapter)
             return True
         except Exception as e:
