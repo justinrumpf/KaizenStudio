@@ -21,16 +21,18 @@ class _GoProSSLAdapter(HTTPAdapter):
     """HTTPS adapter with custom SSL context for GoPro self-signed certs."""
 
     def __init__(self, cert_file: str, **kwargs):
-        self._cert_file = cert_file
+        self._ctx = ssl.SSLContext(ssl.PROTOCOL_TLS)
+        self._ctx.verify_mode = ssl.CERT_NONE
+        self._ctx.check_hostname = False
+        self._ctx.load_verify_locations(cert_file)
         super().__init__(**kwargs)
 
     def init_poolmanager(self, *args, **kwargs):
-        ctx = create_urllib3_context()
-        ctx.load_verify_locations(self._cert_file)
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_REQUIRED
-        kwargs["ssl_context"] = ctx
+        kwargs["ssl_context"] = self._ctx
         return super().init_poolmanager(*args, **kwargs)
+
+    def cert_verify(self, conn, url, verify, cert):
+        pass
 
 
 class StreamManager:
@@ -69,6 +71,7 @@ class StreamManager:
                 self.config = json.load(f)
 
             self.session = requests.Session()
+            self.session.verify = False
             self.session.auth = (self.config["username"], self.config["password"])
 
             # Use custom SSL context — GoPro self-signed certs may lack

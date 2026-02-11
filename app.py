@@ -276,22 +276,26 @@ class GoProSSLAdapter(HTTPAdapter):
     """HTTPS adapter that uses a custom SSL context for GoPro's self-signed certs.
 
     GoPro COHN certificates may lack the Authority Key Identifier extension,
-    which causes Python's default SSL verification to reject them.  This adapter
-    builds a permissive-but-pinned context: it loads the camera's cert as the
-    only trusted CA and skips hostname checking (the camera is reached by IP).
+    which causes Python's default SSL verification to reject them.  We build
+    our own ssl.SSLContext that trusts only the camera cert, then prevent
+    requests/urllib3 from overriding it via cert_verify.
     """
 
     def __init__(self, cert_file: str, **kwargs):
         self._cert_file = cert_file
+        self._ctx = ssl.SSLContext(ssl.PROTOCOL_TLS)
+        self._ctx.verify_mode = ssl.CERT_NONE   # let the context trust our CA only
+        self._ctx.check_hostname = False
+        self._ctx.load_verify_locations(cert_file)
         super().__init__(**kwargs)
 
     def init_poolmanager(self, *args, **kwargs):
-        ctx = create_urllib3_context()
-        ctx.load_verify_locations(self._cert_file)
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_REQUIRED
-        kwargs["ssl_context"] = ctx
+        kwargs["ssl_context"] = self._ctx
         return super().init_poolmanager(*args, **kwargs)
+
+    def cert_verify(self, conn, url, verify, cert):
+        # Skip requests' default cert_verify — our ssl_context handles it
+        pass
 
 
 def init_gopro_session():
@@ -306,6 +310,7 @@ def init_gopro_session():
             gopro_config = json.load(f)
 
         gopro_session = requests.Session()
+        gopro_session.verify = False
         gopro_session.auth = (gopro_config["username"], gopro_config["password"])
 
         adapter = GoProSSLAdapter(str(GOPRO_CERT_FILE), pool_connections=1, pool_maxsize=1)
