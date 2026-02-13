@@ -801,6 +801,53 @@
             z-index: 5;
         }
 
+        /* Crop tool overlay canvas */
+        .crop-canvas {
+            position: absolute;
+            top: 0; left: 0;
+            cursor: crosshair;
+            touch-action: none;
+            display: none;
+            z-index: 6;
+        }
+
+        /* Rotate tool overlay canvas */
+        .rotate-canvas {
+            position: absolute;
+            top: 0; left: 0;
+            cursor: grab;
+            touch-action: none;
+            display: none;
+            z-index: 7;
+        }
+        .rotate-canvas:active { cursor: grabbing; }
+
+        /* View Zoom (scroll-wheel zoom on before/after images) */
+        .view-zoom-viewport {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transform-origin: 0 0;
+        }
+        .view-zoom-badge {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: rgba(0,0,0,0.7);
+            color: #fff;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            z-index: 20;
+            pointer-events: none;
+        }
+
         /* Erase brush cursor */
         .erase-brush-cursor {
             position: fixed;
@@ -1011,8 +1058,11 @@
                 </div>
 
                 <div class="before-image-wrapper" id="before-image-wrapper">
-                    <img id="before-image" alt="Original / Before">
-                    <svg id="before-selection-overlay" style="position: absolute; top: 0; left: 0; pointer-events: none; display: none;"></svg>
+                    <div class="view-zoom-viewport" id="before-viewport">
+                        <img id="before-image" alt="Original / Before">
+                        <svg id="before-selection-overlay" style="position: absolute; top: 0; left: 0; pointer-events: none; display: none;"></svg>
+                    </div>
+                    <div class="view-zoom-badge" id="before-zoom-badge" style="display:none;">1.0x</div>
                 </div>
             </div>
 
@@ -1056,6 +1106,14 @@
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/><path d="M8 11h6"/><path d="M11 8v6"/></svg>
                     <span>Zoom</span>
                 </button>
+                <button class="tool-btn" id="after-tool-crop" title="Crop to shape">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/></svg>
+                    <span>Crop</span>
+                </button>
+                <button class="tool-btn" id="after-tool-rotate" title="Rotate image">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"/><path d="M21 8A9 9 0 0 0 6.67 5.08L3 8"/><path d="M3 22v-6h6"/><path d="M3 16a9 9 0 0 0 14.33 2.92L21 16"/></svg>
+                    <span>Rotate</span>
+                </button>
                 <div class="toolbar-divider"></div>
                 <button class="tool-btn" id="after-tool-undo" title="Undo last edit" disabled>
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
@@ -1091,13 +1149,40 @@
                 <button id="cancel-erase-btn" class="opt-btn opt-btn-muted">Cancel</button>
             </div>
 
+            <div class="tool-options" id="after-crop-options">
+                <div class="select-mode-toggle" id="crop-shape-toggle">
+                    <button class="select-mode-btn active" data-shape="rectangle">Rectangle</button>
+                    <button class="select-mode-btn" data-shape="circle">Circle</button>
+                </div>
+                <span class="opt-hint">Click and drag to define crop area</span>
+                <button id="apply-crop-btn" class="opt-btn opt-btn-primary" disabled>Apply Crop</button>
+                <button id="cancel-crop-btn" class="opt-btn opt-btn-muted">Cancel</button>
+            </div>
+
+            <div class="tool-options" id="after-rotate-options">
+                <button class="zoom-btn" id="rotate-left-90-btn" title="Rotate 90° left">&#x21B6;</button>
+                <button class="zoom-btn" id="rotate-right-90-btn" title="Rotate 90° right">&#x21B7;</button>
+                <span style="display:inline-block;width:1px;height:20px;background:#ddd;margin:0 8px;vertical-align:middle;"></span>
+                <label>Angle:</label>
+                <input type="range" id="rotate-angle-slider" min="-180" max="180" value="0" step="0.5">
+                <span class="brush-val" id="rotate-angle-val">0°</span>
+                <span class="opt-hint">Drag image or slider to rotate</span>
+                <button id="apply-rotate-btn" class="opt-btn opt-btn-primary">Apply</button>
+                <button id="cancel-rotate-btn" class="opt-btn opt-btn-muted">Cancel</button>
+            </div>
+
             <div class="result-image-container" id="result-container">
                 <div class="result-placeholder" id="result-placeholder">
                     Capture or upload an image to see result
                 </div>
-                <img id="result-image" style="display: none;" alt="Result">
-                <svg id="selection-overlay" style="position: absolute; top: 0; left: 0; pointer-events: none; display: none;"></svg>
-                <canvas id="erase-canvas" class="erase-canvas"></canvas>
+                <div class="view-zoom-viewport" id="result-viewport">
+                    <img id="result-image" style="display: none;" alt="Result">
+                    <svg id="selection-overlay" style="position: absolute; top: 0; left: 0; pointer-events: none; display: none;"></svg>
+                    <canvas id="erase-canvas" class="erase-canvas"></canvas>
+                    <canvas id="crop-canvas" class="crop-canvas"></canvas>
+                    <canvas id="rotate-canvas" class="rotate-canvas"></canvas>
+                </div>
+                <div class="view-zoom-badge" id="result-zoom-badge" style="display:none;">1.0x</div>
             </div>
             <div id="erase-brush-cursor" class="erase-brush-cursor"></div>
 
@@ -1243,10 +1328,15 @@
         let hasProcessedSelection = false;
         let beforeSelectMode = 'broad';   // 'broad' or 'detail'
         let resultSelectMode = 'broad';   // 'broad' or 'detail'
-        let afterActiveTool = null;       // null, 'sam', 'erase', or 'zoom'
+        let afterActiveTool = null;       // null, 'sam', 'erase', 'zoom', or 'crop'
         let subjectZoom = 100;            // 50-150, controls subject size in 2048 square
         let hasUndo = false;
         let useOriginalMode = false;
+
+        // View-zoom state (scroll-wheel zoom on before/after images)
+        let beforeViewZoom = 1, beforePanX = 0, beforePanY = 0;
+        let resultViewZoom = 1, resultPanX = 0, resultPanY = 0;
+        const VIEW_ZOOM_MIN = 1, VIEW_ZOOM_MAX = 5;
 
         function resultImageUrl(imageId) {
             if (useOriginalMode) {
@@ -1312,6 +1402,230 @@
         const batteryIndicator = document.getElementById('battery-indicator');
         const batteryFill = document.getElementById('battery-fill');
         const batteryPct = document.getElementById('battery-pct');
+
+        // Elements - View Zoom
+        const beforeViewport = document.getElementById('before-viewport');
+        const resultViewport = document.getElementById('result-viewport');
+        const beforeZoomBadge = document.getElementById('before-zoom-badge');
+        const resultZoomBadge = document.getElementById('result-zoom-badge');
+
+        // ==================== View Zoom (scroll-wheel zoom) ====================
+
+        function applyViewZoom(viewport, zoom, panX, panY, badge) {
+            viewport.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+            if (zoom > 1) {
+                badge.style.display = '';
+                badge.textContent = zoom.toFixed(1) + 'x';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+
+        function resetBeforeViewZoom() {
+            beforeViewZoom = 1; beforePanX = 0; beforePanY = 0;
+            beforeViewport.style.transform = '';
+            beforeZoomBadge.style.display = 'none';
+        }
+
+        function resetResultViewZoom() {
+            resultViewZoom = 1; resultPanX = 0; resultPanY = 0;
+            resultViewport.style.transform = '';
+            resultZoomBadge.style.display = 'none';
+        }
+
+        function handleViewZoomWheel(e, container, viewport, badge, getState, setState) {
+            e.preventDefault();
+            const { zoom: oldZoom, panX: oldPanX, panY: oldPanY } = getState();
+            const rect = container.getBoundingClientRect();
+            const cursorX = e.clientX - rect.left;
+            const cursorY = e.clientY - rect.top;
+
+            const delta = e.deltaY > 0 ? -0.25 : 0.25;
+            const newZoom = Math.min(VIEW_ZOOM_MAX, Math.max(VIEW_ZOOM_MIN, oldZoom + delta));
+            if (newZoom === oldZoom) return;
+
+            // Zoom centered on cursor
+            const contentX = (cursorX - oldPanX) / oldZoom;
+            const contentY = (cursorY - oldPanY) / oldZoom;
+            let newPanX = cursorX - contentX * newZoom;
+            let newPanY = cursorY - contentY * newZoom;
+
+            // Clamp pan so content doesn't drift too far
+            if (newZoom <= 1) { newPanX = 0; newPanY = 0; }
+
+            setState(newZoom, newPanX, newPanY);
+            applyViewZoom(viewport, newZoom, newPanX, newPanY, badge);
+        }
+
+        function setupViewZoomPan(container, viewport, badge, getState, setState) {
+            let isPanning = false;
+            let panStartX = 0, panStartY = 0;
+            let startPanX = 0, startPanY = 0;
+
+            container.addEventListener('contextmenu', (e) => {
+                if (getState().zoom > 1) e.preventDefault();
+            });
+
+            container.addEventListener('mousedown', (e) => {
+                if (e.button !== 2) return; // right-click only
+                const { zoom, panX, panY } = getState();
+                if (zoom <= 1) return;
+                e.preventDefault();
+                isPanning = true;
+                panStartX = e.clientX;
+                panStartY = e.clientY;
+                startPanX = panX;
+                startPanY = panY;
+                container.style.cursor = 'grabbing';
+            });
+
+            window.addEventListener('mousemove', (e) => {
+                if (!isPanning) return;
+                const dx = e.clientX - panStartX;
+                const dy = e.clientY - panStartY;
+                const newPanX = startPanX + dx;
+                const newPanY = startPanY + dy;
+                const { zoom } = getState();
+                setState(zoom, newPanX, newPanY);
+                applyViewZoom(viewport, zoom, newPanX, newPanY, badge);
+            });
+
+            window.addEventListener('mouseup', (e) => {
+                if (e.button === 2 && isPanning) {
+                    isPanning = false;
+                    container.style.cursor = '';
+                }
+            });
+        }
+
+        // Wire up before-image zoom
+        beforeImageWrapper.addEventListener('wheel', (e) => {
+            handleViewZoomWheel(e, beforeImageWrapper, beforeViewport, beforeZoomBadge,
+                () => ({ zoom: beforeViewZoom, panX: beforePanX, panY: beforePanY }),
+                (z, px, py) => { beforeViewZoom = z; beforePanX = px; beforePanY = py; }
+            );
+        }, { passive: false });
+
+        setupViewZoomPan(beforeImageWrapper, beforeViewport, beforeZoomBadge,
+            () => ({ zoom: beforeViewZoom, panX: beforePanX, panY: beforePanY }),
+            (z, px, py) => { beforeViewZoom = z; beforePanX = px; beforePanY = py; }
+        );
+
+        // Wire up result-image zoom
+        resultContainer.addEventListener('wheel', (e) => {
+            handleViewZoomWheel(e, resultContainer, resultViewport, resultZoomBadge,
+                () => ({ zoom: resultViewZoom, panX: resultPanX, panY: resultPanY }),
+                (z, px, py) => { resultViewZoom = z; resultPanX = px; resultPanY = py; }
+            );
+        }, { passive: false });
+
+        setupViewZoomPan(resultContainer, resultViewport, resultZoomBadge,
+            () => ({ zoom: resultViewZoom, panX: resultPanX, panY: resultPanY }),
+            (z, px, py) => { resultViewZoom = z; resultPanX = px; resultPanY = py; }
+        );
+
+        // Pinch-to-zoom + two-finger pan + double-tap reset (touch support)
+        function setupViewZoomTouch(container, viewport, badge, getState, setState, resetFn, whichTimer) {
+            let lastTouchDist = 0;
+            let isTouchZooming = false;
+            let lastTapTime = 0;
+
+            container.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 2) {
+                    e.preventDefault();
+                    isTouchZooming = true;
+                    const t1 = e.touches[0], t2 = e.touches[1];
+                    lastTouchDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+                }
+            }, { passive: false });
+
+            container.addEventListener('touchmove', (e) => {
+                if (e.touches.length === 2 && isTouchZooming) {
+                    e.preventDefault();
+                    const t1 = e.touches[0], t2 = e.touches[1];
+                    const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+                    const centerX = (t1.clientX + t2.clientX) / 2;
+                    const centerY = (t1.clientY + t2.clientY) / 2;
+
+                    const { zoom: oldZoom, panX: oldPanX, panY: oldPanY } = getState();
+                    const rect = container.getBoundingClientRect();
+                    const cursorX = centerX - rect.left;
+                    const cursorY = centerY - rect.top;
+
+                    const scaleFactor = dist / lastTouchDist;
+                    const newZoom = Math.min(VIEW_ZOOM_MAX, Math.max(VIEW_ZOOM_MIN, oldZoom * scaleFactor));
+
+                    const contentX = (cursorX - oldPanX) / oldZoom;
+                    const contentY = (cursorY - oldPanY) / oldZoom;
+                    let newPanX = cursorX - contentX * newZoom;
+                    let newPanY = cursorY - contentY * newZoom;
+
+                    if (newZoom <= 1) { newPanX = 0; newPanY = 0; }
+
+                    lastTouchDist = dist;
+                    setState(newZoom, newPanX, newPanY);
+                    applyViewZoom(viewport, newZoom, newPanX, newPanY, badge);
+                }
+            }, { passive: false });
+
+            container.addEventListener('touchend', (e) => {
+                if (e.touches.length < 2) {
+                    if (isTouchZooming) {
+                        isTouchZooming = false;
+                        lastTapTime = 0;
+                        return;
+                    }
+                    // Double-tap to reset zoom
+                    if (e.touches.length === 0) {
+                        const now = Date.now();
+                        if (now - lastTapTime < 300 && getState().zoom > 1) {
+                            e.preventDefault();
+                            if (whichTimer === 'before' && beforeClickTimer) {
+                                clearTimeout(beforeClickTimer); beforeClickTimer = null;
+                            } else if (whichTimer === 'result' && resultClickTimer) {
+                                clearTimeout(resultClickTimer); resultClickTimer = null;
+                            }
+                            resetFn();
+                            lastTapTime = 0;
+                            return;
+                        }
+                        lastTapTime = now;
+                    }
+                }
+            });
+        }
+
+        setupViewZoomTouch(beforeImageWrapper, beforeViewport, beforeZoomBadge,
+            () => ({ zoom: beforeViewZoom, panX: beforePanX, panY: beforePanY }),
+            (z, px, py) => { beforeViewZoom = z; beforePanX = px; beforePanY = py; },
+            resetBeforeViewZoom, 'before'
+        );
+
+        setupViewZoomTouch(resultContainer, resultViewport, resultZoomBadge,
+            () => ({ zoom: resultViewZoom, panX: resultPanX, panY: resultPanY }),
+            (z, px, py) => { resultViewZoom = z; resultPanX = px; resultPanY = py; },
+            resetResultViewZoom, 'result'
+        );
+
+        // Double-click to reset zoom (mouse — with click timer to avoid SAM double-fire)
+        let beforeClickTimer = null;
+        let resultClickTimer = null;
+
+        beforeImageWrapper.addEventListener('dblclick', (e) => {
+            if (beforeViewZoom > 1) {
+                e.stopPropagation();
+                if (beforeClickTimer) { clearTimeout(beforeClickTimer); beforeClickTimer = null; }
+                resetBeforeViewZoom();
+            }
+        });
+
+        resultContainer.addEventListener('dblclick', (e) => {
+            if (resultViewZoom > 1) {
+                e.stopPropagation();
+                if (resultClickTimer) { clearTimeout(resultClickTimer); resultClickTimer = null; }
+                resetResultViewZoom();
+            }
+        });
 
         // ==================== GoPro Status ====================
 
@@ -1542,6 +1856,8 @@
             subjectZoom = 100;
             hasUndo = false;
             undoBtn.disabled = true;
+            resetBeforeViewZoom();
+            resetResultViewZoom();
 
             // Clear any previous selections
             clearBeforeSelection();
@@ -1602,58 +1918,62 @@
 
         // ==================== Before Image Segmentation ====================
 
-        beforeImage.addEventListener('click', async (e) => {
+        beforeImage.addEventListener('click', (e) => {
             if (!currentImageId) return;
+            if (beforeClickTimer) clearTimeout(beforeClickTimer);
+            const clickEvent = { clientX: e.clientX, clientY: e.clientY };
+            beforeClickTimer = setTimeout(async () => {
+                beforeClickTimer = null;
+                const rect = beforeImage.getBoundingClientRect();
+                const scaleX = beforeImage.naturalWidth / rect.width;
+                const scaleY = beforeImage.naturalHeight / rect.height;
+                const x = Math.round((clickEvent.clientX - rect.left) * scaleX);
+                const y = Math.round((clickEvent.clientY - rect.top) * scaleY);
 
-            const rect = beforeImage.getBoundingClientRect();
-            const scaleX = beforeImage.naturalWidth / rect.width;
-            const scaleY = beforeImage.naturalHeight / rect.height;
-            const x = Math.round((e.clientX - rect.left) * scaleX);
-            const y = Math.round((e.clientY - rect.top) * scaleY);
+                try {
+                    const res = await fetch('/select_color', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            image_id: currentImageId,
+                            x: x,
+                            y: y,
+                            mode: 'original',
+                            select_mode: beforeSelectMode
+                        })
+                    });
+                    const data = await res.json();
 
-            try {
-                const res = await fetch('/select_color', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        image_id: currentImageId,
-                        x: x,
-                        y: y,
-                        mode: 'original',
-                        select_mode: beforeSelectMode
-                    })
-                });
-                const data = await res.json();
-
-                if (data.success && data.contours && data.contours.length > 0) {
-                    showBeforeSelectionOutline(data.contours);
-                    hasBeforeSelection = true;
-                    addSegmentBtn.disabled = false;
-                    keepOnlyBeforeBtn.disabled = false;
-                    if (data.area) {
-                        beforePixelCount.textContent = `(${data.area.toLocaleString()} px)`;
+                    if (data.success && data.contours && data.contours.length > 0) {
+                        showBeforeSelectionOutline(data.contours);
+                        hasBeforeSelection = true;
+                        addSegmentBtn.disabled = false;
+                        keepOnlyBeforeBtn.disabled = false;
+                        if (data.area) {
+                            beforePixelCount.textContent = `(${data.area.toLocaleString()} px)`;
+                        }
+                    } else {
+                        console.log('No segment found at click point');
                     }
-                } else {
-                    console.log('No segment found at click point');
+                } catch (err) {
+                    console.error('Selection error:', err);
                 }
-            } catch (err) {
-                console.error('Selection error:', err);
-            }
+            }, 250);
         });
 
         function showBeforeSelectionOutline(contours) {
             const img = beforeImage;
-            const rect = img.getBoundingClientRect();
-            const wrapperRect = beforeImageWrapper.getBoundingClientRect();
+            const imgW = img.clientWidth;
+            const imgH = img.clientHeight;
 
-            beforeSelectionOverlay.style.left = (rect.left - wrapperRect.left) + 'px';
-            beforeSelectionOverlay.style.top = (rect.top - wrapperRect.top) + 'px';
-            beforeSelectionOverlay.style.width = rect.width + 'px';
-            beforeSelectionOverlay.style.height = rect.height + 'px';
+            beforeSelectionOverlay.style.left = img.offsetLeft + 'px';
+            beforeSelectionOverlay.style.top = img.offsetTop + 'px';
+            beforeSelectionOverlay.style.width = imgW + 'px';
+            beforeSelectionOverlay.style.height = imgH + 'px';
             beforeSelectionOverlay.style.display = 'block';
 
-            const scaleX = rect.width / img.naturalWidth;
-            const scaleY = rect.height / img.naturalHeight;
+            const scaleX = imgW / img.naturalWidth;
+            const scaleY = imgH / img.naturalHeight;
 
             let pathData = '';
             contours.forEach(contour => {
@@ -1666,12 +1986,14 @@
                 }
             });
 
+            const sw = 2 / beforeViewZoom;
+            const da = (6 / beforeViewZoom) + ',' + (3 / beforeViewZoom);
             beforeSelectionOverlay.innerHTML = `
                 <path d="${pathData}"
                       fill="rgba(0, 170, 0, 0.25)"
                       stroke="#00cc00"
-                      stroke-width="2"
-                      stroke-dasharray="6,3"
+                      stroke-width="${sw}"
+                      stroke-dasharray="${da}"
                       stroke-linecap="round"/>
             `;
         }
@@ -1755,55 +2077,59 @@
 
         // ==================== Processed Image Selection (Remove) ====================
 
-        resultImage.addEventListener('click', async (e) => {
+        resultImage.addEventListener('click', (e) => {
             if (!currentImageId || afterActiveTool !== 'sam') return;
+            if (resultClickTimer) clearTimeout(resultClickTimer);
+            const clickEvent = { clientX: e.clientX, clientY: e.clientY };
+            resultClickTimer = setTimeout(async () => {
+                resultClickTimer = null;
+                const rect = resultImage.getBoundingClientRect();
+                const scaleX = resultImage.naturalWidth / rect.width;
+                const scaleY = resultImage.naturalHeight / rect.height;
+                const x = Math.round((clickEvent.clientX - rect.left) * scaleX);
+                const y = Math.round((clickEvent.clientY - rect.top) * scaleY);
 
-            const rect = resultImage.getBoundingClientRect();
-            const scaleX = resultImage.naturalWidth / rect.width;
-            const scaleY = resultImage.naturalHeight / rect.height;
-            const x = Math.round((e.clientX - rect.left) * scaleX);
-            const y = Math.round((e.clientY - rect.top) * scaleY);
+                try {
+                    const res = await fetch('/select_color', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            image_id: currentImageId,
+                            x: x,
+                            y: y,
+                            tolerance: 50,
+                            select_mode: resultSelectMode,
+                            zoom: subjectZoom
+                        })
+                    });
+                    const data = await res.json();
 
-            try {
-                const res = await fetch('/select_color', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        image_id: currentImageId,
-                        x: x,
-                        y: y,
-                        tolerance: 50,
-                        select_mode: resultSelectMode,
-                        zoom: subjectZoom
-                    })
-                });
-                const data = await res.json();
-
-                if (data.success && data.contours && data.contours.length > 0) {
-                    showProcessedSelectionOutline(data.contours);
-                    hasProcessedSelection = true;
-                    if (data.area) {
-                        selectionCount.textContent = `(${data.area.toLocaleString()} px)`;
+                    if (data.success && data.contours && data.contours.length > 0) {
+                        showProcessedSelectionOutline(data.contours);
+                        hasProcessedSelection = true;
+                        if (data.area) {
+                            selectionCount.textContent = `(${data.area.toLocaleString()} px)`;
+                        }
                     }
+                } catch (err) {
+                    console.error('Selection error:', err);
                 }
-            } catch (err) {
-                console.error('Selection error:', err);
-            }
+            }, 250);
         });
 
         function showProcessedSelectionOutline(contours) {
             const img = resultImage;
-            const rect = img.getBoundingClientRect();
-            const containerRect = resultContainer.getBoundingClientRect();
+            const imgW = img.clientWidth;
+            const imgH = img.clientHeight;
 
-            selectionOverlay.style.left = (rect.left - containerRect.left) + 'px';
-            selectionOverlay.style.top = (rect.top - containerRect.top) + 'px';
-            selectionOverlay.style.width = rect.width + 'px';
-            selectionOverlay.style.height = rect.height + 'px';
+            selectionOverlay.style.left = img.offsetLeft + 'px';
+            selectionOverlay.style.top = img.offsetTop + 'px';
+            selectionOverlay.style.width = imgW + 'px';
+            selectionOverlay.style.height = imgH + 'px';
             selectionOverlay.style.display = 'block';
 
-            const scaleX = rect.width / img.naturalWidth;
-            const scaleY = rect.height / img.naturalHeight;
+            const scaleX = imgW / img.naturalWidth;
+            const scaleY = imgH / img.naturalHeight;
 
             let pathData = '';
             contours.forEach(contour => {
@@ -1816,12 +2142,14 @@
                 }
             });
 
+            const sw = 2 / resultViewZoom;
+            const da = (5 / resultViewZoom) + ',' + (5 / resultViewZoom);
             selectionOverlay.innerHTML = `
                 <path d="${pathData}"
                       fill="rgba(255, 0, 0, 0.2)"
                       stroke="#ff0000"
-                      stroke-width="2"
-                      stroke-dasharray="5,5"
+                      stroke-width="${sw}"
+                      stroke-dasharray="${da}"
                       stroke-linecap="round"/>
             `;
         }
@@ -1916,11 +2244,55 @@
         let erasePoints = [];
         let eraseBrushSize = 20;
 
+        // Crop tool state
+        const cropCanvas = document.getElementById('crop-canvas');
+        const cropCtx = cropCanvas.getContext('2d');
+        const applyCropBtn = document.getElementById('apply-crop-btn');
+        const cancelCropBtn = document.getElementById('cancel-crop-btn');
+        let cropMode = false;
+        let cropShape = 'rectangle';
+        let cropStart = null;
+        let cropEnd = null;
+        let isCropping = false;
+
+        // Rotate tool state
+        const rotateCanvas = document.getElementById('rotate-canvas');
+        const rotateCtx = rotateCanvas.getContext('2d');
+        let rotateMode = false;
+        let rotateAngle = 0;
+        let isRotateDragging = false;
+        let rotateDragStartAngle = 0;
+        let rotateDragInitialAngle = 0;
+
         document.getElementById('after-tool-sam').addEventListener('click', () => setAfterTool('sam'));
         document.getElementById('after-tool-erase').addEventListener('click', () => setAfterTool('erase'));
         document.getElementById('after-tool-zoom').addEventListener('click', () => setAfterTool('zoom'));
+        document.getElementById('after-tool-crop').addEventListener('click', () => setAfterTool('crop'));
+        document.getElementById('after-tool-rotate').addEventListener('click', () => setAfterTool('rotate'));
         applyEraseBtn.addEventListener('click', () => applyErase());
         cancelEraseBtn.addEventListener('click', () => deactivateAfterTool());
+        applyCropBtn.addEventListener('click', () => applyCrop());
+        cancelCropBtn.addEventListener('click', () => deactivateAfterTool());
+        document.getElementById('apply-rotate-btn').addEventListener('click', () => applyRotate());
+        document.getElementById('cancel-rotate-btn').addEventListener('click', () => deactivateAfterTool());
+        document.getElementById('rotate-left-90-btn').addEventListener('click', () => applyQuickRotate(-90));
+        document.getElementById('rotate-right-90-btn').addEventListener('click', () => applyQuickRotate(90));
+        document.getElementById('rotate-angle-slider').addEventListener('input', () => {
+            rotateAngle = parseFloat(document.getElementById('rotate-angle-slider').value);
+            document.getElementById('rotate-angle-val').textContent = rotateAngle + '°';
+            applyRotatePreview();
+        });
+
+        // Crop shape toggle
+        document.querySelectorAll('#crop-shape-toggle .select-mode-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('#crop-shape-toggle .select-mode-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                cropShape = btn.dataset.shape;
+                // Redraw preview if we already have a selection
+                if (cropStart && cropEnd) drawCropPreview();
+            });
+        });
 
         undoBtn.addEventListener('click', async () => {
             if (!currentImageId || !hasUndo) return;
@@ -1997,6 +2369,12 @@
             } else if (tool === 'zoom') {
                 document.getElementById('after-zoom-options').classList.add('visible');
                 zoomSliderVal.textContent = subjectZoom + '%';
+            } else if (tool === 'crop') {
+                document.getElementById('after-crop-options').classList.add('visible');
+                enterCropMode();
+            } else if (tool === 'rotate') {
+                document.getElementById('after-rotate-options').classList.add('visible');
+                enterRotateMode();
             }
         }
 
@@ -2005,12 +2383,18 @@
                 clearProcessedSelection();
             } else if (afterActiveTool === 'erase') {
                 exitEraseMode();
+            } else if (afterActiveTool === 'crop') {
+                exitCropMode();
+            } else if (afterActiveTool === 'rotate') {
+                exitRotateMode();
             }
 
             document.querySelectorAll('#after-toolbar .tool-btn').forEach(b => b.classList.remove('active'));
             document.getElementById('after-sam-options').classList.remove('visible');
             document.getElementById('after-erase-options').classList.remove('visible');
             document.getElementById('after-zoom-options').classList.remove('visible');
+            document.getElementById('after-crop-options').classList.remove('visible');
+            document.getElementById('after-rotate-options').classList.remove('visible');
 
             resultImage.style.cursor = '';
             resultImage.style.pointerEvents = '';
@@ -2045,24 +2429,26 @@
 
         function setupEraseCanvas() {
             const img = resultImage;
-            const rect = img.getBoundingClientRect();
-            const containerRect = resultContainer.getBoundingClientRect();
+            const w = img.clientWidth;
+            const h = img.clientHeight;
 
-            eraseCanvas.width = rect.width;
-            eraseCanvas.height = rect.height;
-            eraseCanvas.style.left = (rect.left - containerRect.left) + 'px';
-            eraseCanvas.style.top = (rect.top - containerRect.top) + 'px';
-            eraseCanvas.style.width = rect.width + 'px';
-            eraseCanvas.style.height = rect.height + 'px';
+            eraseCanvas.width = w;
+            eraseCanvas.height = h;
+            eraseCanvas.style.left = img.offsetLeft + 'px';
+            eraseCanvas.style.top = img.offsetTop + 'px';
+            eraseCanvas.style.width = w + 'px';
+            eraseCanvas.style.height = h + 'px';
 
             eraseCtx.clearRect(0, 0, eraseCanvas.width, eraseCanvas.height);
         }
 
         function getEraseCoords(e) {
             const rect = eraseCanvas.getBoundingClientRect();
+            const sx = eraseCanvas.width / rect.width;
+            const sy = eraseCanvas.height / rect.height;
             return {
-                x: e.clientX - rect.left,
-                y: e.clientY - rect.top,
+                x: (e.clientX - rect.left) * sx,
+                y: (e.clientY - rect.top) * sy,
                 clientX: e.clientX,
                 clientY: e.clientY
             };
@@ -2088,8 +2474,10 @@
         }
 
         function drawErasePoint(x, y) {
+            // Divide by view zoom so the brush stays the same visual size on screen
+            const r = eraseBrushSize / resultViewZoom;
             eraseCtx.beginPath();
-            eraseCtx.arc(x, y, eraseBrushSize, 0, Math.PI * 2);
+            eraseCtx.arc(x, y, r, 0, Math.PI * 2);
             eraseCtx.fillStyle = 'rgba(220, 53, 69, 0.35)';
             eraseCtx.fill();
         }
@@ -2103,6 +2491,7 @@
 
         // Mouse events on erase canvas
         eraseCanvas.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
             e.preventDefault();
             startErase(e);
         });
@@ -2119,21 +2508,22 @@
             if (eraseMode) updateEraseCursor(e);
         });
 
-        // Touch events on erase canvas
+        // Touch events on erase canvas (single-touch only; multi-touch → pinch zoom)
         eraseCanvas.addEventListener('touchstart', (e) => {
+            if (e.touches.length > 1) { stopErase(); return; }
             e.preventDefault();
             const touch = e.touches[0];
             startErase(touch);
             updateEraseCursor(touch);
         }, { passive: false });
         eraseCanvas.addEventListener('touchmove', (e) => {
+            if (e.touches.length > 1) { stopErase(); return; }
             e.preventDefault();
             const touch = e.touches[0];
             doErase(touch);
             updateEraseCursor(touch);
         }, { passive: false });
         eraseCanvas.addEventListener('touchend', (e) => {
-            e.preventDefault();
             stopErase();
             eraseBrushCursor.style.display = 'none';
         });
@@ -2159,7 +2549,8 @@
                 Math.round(p[1] * scaleY)
             ]);
 
-            const scaledBrush = Math.round(eraseBrushSize * Math.max(scaleX, scaleY));
+            const effectiveBrush = eraseBrushSize / resultViewZoom;
+            const scaledBrush = Math.round(effectiveBrush * Math.max(scaleX, scaleY));
 
             try {
                 const res = await fetch('/adjust', {
@@ -2192,10 +2583,449 @@
             resultLoading.classList.add('hidden');
         }
 
-        // Re-setup erase canvas on window resize
+        // Re-setup erase/crop/rotate canvas on window resize; reset view zoom
         window.addEventListener('resize', () => {
+            resetBeforeViewZoom();
+            resetResultViewZoom();
             if (eraseMode) setupEraseCanvas();
+            if (cropMode) {
+                setupCropCanvas();
+                if (cropStart && cropEnd) drawCropPreview();
+            }
+            if (rotateMode) {
+                setupRotateCanvas();
+                drawRotateGuides();
+                applyRotatePreview();
+            }
         });
+
+        // ==================== Crop Tool ====================
+
+        function enterCropMode() {
+            cropMode = true;
+            cropStart = null;
+            cropEnd = null;
+            isCropping = false;
+            applyCropBtn.disabled = true;
+            setupCropCanvas();
+            cropCanvas.style.display = 'block';
+            resultImage.style.pointerEvents = 'none';
+        }
+
+        function exitCropMode() {
+            cropMode = false;
+            isCropping = false;
+            cropStart = null;
+            cropEnd = null;
+            cropCanvas.style.display = 'none';
+            cropCtx.clearRect(0, 0, cropCanvas.width, cropCanvas.height);
+            resultImage.style.pointerEvents = '';
+            applyCropBtn.disabled = true;
+        }
+
+        function setupCropCanvas() {
+            const img = resultImage;
+            const w = img.clientWidth;
+            const h = img.clientHeight;
+
+            cropCanvas.width = w;
+            cropCanvas.height = h;
+            cropCanvas.style.left = img.offsetLeft + 'px';
+            cropCanvas.style.top = img.offsetTop + 'px';
+            cropCanvas.style.width = w + 'px';
+            cropCanvas.style.height = h + 'px';
+
+            cropCtx.clearRect(0, 0, cropCanvas.width, cropCanvas.height);
+        }
+
+        function getCropCoords(e) {
+            const rect = cropCanvas.getBoundingClientRect();
+            const sx = cropCanvas.width / rect.width;
+            const sy = cropCanvas.height / rect.height;
+            return {
+                x: Math.max(0, Math.min(cropCanvas.width, (e.clientX - rect.left) * sx)),
+                y: Math.max(0, Math.min(cropCanvas.height, (e.clientY - rect.top) * sy))
+            };
+        }
+
+        function startCrop(e) {
+            if (!cropMode) return;
+            isCropping = true;
+            cropStart = getCropCoords(e);
+            cropEnd = cropStart;
+            applyCropBtn.disabled = true;
+        }
+
+        function doCrop(e) {
+            if (!cropMode || !isCropping) return;
+            cropEnd = getCropCoords(e);
+            drawCropPreview();
+        }
+
+        function stopCrop() {
+            if (!cropMode || !isCropping) return;
+            isCropping = false;
+            if (cropStart && cropEnd) {
+                const w = Math.abs(cropEnd.x - cropStart.x);
+                const h = Math.abs(cropEnd.y - cropStart.y);
+                if (w > 5 && h > 5) {
+                    applyCropBtn.disabled = false;
+                }
+            }
+        }
+
+        function drawCropPreview() {
+            const w = cropCanvas.width;
+            const h = cropCanvas.height;
+            cropCtx.clearRect(0, 0, w, h);
+
+            if (!cropStart || !cropEnd) return;
+
+            const x1 = Math.min(cropStart.x, cropEnd.x);
+            const y1 = Math.min(cropStart.y, cropEnd.y);
+            const x2 = Math.max(cropStart.x, cropEnd.x);
+            const y2 = Math.max(cropStart.y, cropEnd.y);
+            const rw = x2 - x1;
+            const rh = y2 - y1;
+
+            // Draw dark overlay over entire canvas
+            cropCtx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            cropCtx.fillRect(0, 0, w, h);
+
+            // Cut out the shape using destination-out
+            cropCtx.save();
+            cropCtx.globalCompositeOperation = 'destination-out';
+            cropCtx.fillStyle = 'rgba(0, 0, 0, 1)';
+
+            if (cropShape === 'rectangle') {
+                cropCtx.fillRect(x1, y1, rw, rh);
+            } else {
+                // Circle: inscribed in drag box, perfect circle using max dimension
+                const cx = x1 + rw / 2;
+                const cy = y1 + rh / 2;
+                const radius = Math.max(rw, rh) / 2;
+                cropCtx.beginPath();
+                cropCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+                cropCtx.fill();
+            }
+
+            cropCtx.restore();
+
+            // Draw dashed outline
+            cropCtx.save();
+            cropCtx.strokeStyle = '#4a90d9';
+            cropCtx.lineWidth = 2;
+            cropCtx.setLineDash([6, 4]);
+
+            if (cropShape === 'rectangle') {
+                cropCtx.strokeRect(x1, y1, rw, rh);
+            } else {
+                const cx = x1 + rw / 2;
+                const cy = y1 + rh / 2;
+                const radius = Math.max(rw, rh) / 2;
+                cropCtx.beginPath();
+                cropCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+                cropCtx.stroke();
+            }
+
+            cropCtx.restore();
+        }
+
+        // Mouse events on crop canvas
+        cropCanvas.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            startCrop(e);
+        });
+        cropCanvas.addEventListener('mousemove', (e) => {
+            doCrop(e);
+        });
+        cropCanvas.addEventListener('mouseup', () => stopCrop());
+        cropCanvas.addEventListener('mouseleave', () => stopCrop());
+
+        // Touch events on crop canvas (single-touch only; multi-touch → pinch zoom)
+        cropCanvas.addEventListener('touchstart', (e) => {
+            if (e.touches.length > 1) { isCropping = false; return; }
+            e.preventDefault();
+            startCrop(e.touches[0]);
+        }, { passive: false });
+        cropCanvas.addEventListener('touchmove', (e) => {
+            if (e.touches.length > 1) { isCropping = false; return; }
+            e.preventDefault();
+            doCrop(e.touches[0]);
+        }, { passive: false });
+        cropCanvas.addEventListener('touchend', (e) => {
+            stopCrop();
+        });
+
+        async function applyCrop() {
+            if (!currentImageId || !cropStart || !cropEnd) {
+                deactivateAfterTool();
+                return;
+            }
+
+            const img = resultImage;
+            const canvasW = cropCanvas.width;
+            const canvasH = cropCanvas.height;
+            const scaleX = img.naturalWidth / canvasW;
+            const scaleY = img.naturalHeight / canvasH;
+
+            const x1 = Math.round(Math.min(cropStart.x, cropEnd.x) * scaleX);
+            const y1 = Math.round(Math.min(cropStart.y, cropEnd.y) * scaleY);
+            const x2 = Math.round(Math.max(cropStart.x, cropEnd.x) * scaleX);
+            const y2 = Math.round(Math.max(cropStart.y, cropEnd.y) * scaleY);
+
+            let cropData;
+            if (cropShape === 'rectangle') {
+                cropData = { shape: 'rectangle', x1, y1, x2, y2 };
+            } else {
+                const rw = x2 - x1;
+                const rh = y2 - y1;
+                const cx = x1 + rw / 2;
+                const cy = y1 + rh / 2;
+                const radius = Math.max(rw, rh) / 2;
+                cropData = { shape: 'circle', cx: Math.round(cx), cy: Math.round(cy), radius: Math.round(radius) };
+            }
+
+            resultLoading.classList.remove('hidden');
+            loadingText.textContent = 'Applying crop...';
+
+            try {
+                const res = await fetch('/crop_to_shape', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        image_id: currentImageId,
+                        crop: cropData,
+                        zoom: subjectZoom
+                    })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    resultImage.src = resultImageUrl(currentImageId);
+                    hasUndo = true;
+                    undoBtn.disabled = false;
+                } else {
+                    alert(data.error || 'Crop failed');
+                }
+            } catch (err) {
+                alert('Error: ' + err.message);
+            }
+
+            deactivateAfterTool();
+            resultLoading.classList.add('hidden');
+        }
+
+        // ==================== Rotate Tool ====================
+
+        function enterRotateMode() {
+            rotateMode = true;
+            rotateAngle = 0;
+            isRotateDragging = false;
+            document.getElementById('rotate-angle-slider').value = 0;
+            document.getElementById('rotate-angle-val').textContent = '0°';
+            setupRotateCanvas();
+            rotateCanvas.style.display = 'block';
+            drawRotateGuides();
+            resultImage.style.pointerEvents = 'none';
+        }
+
+        function exitRotateMode() {
+            rotateMode = false;
+            isRotateDragging = false;
+            rotateAngle = 0;
+            rotateCanvas.style.display = 'none';
+            rotateCtx.clearRect(0, 0, rotateCanvas.width, rotateCanvas.height);
+            resultImage.style.transform = '';
+            resultImage.style.pointerEvents = '';
+        }
+
+        function setupRotateCanvas() {
+            const img = resultImage;
+            const w = img.clientWidth;
+            const h = img.clientHeight;
+
+            rotateCanvas.width = w;
+            rotateCanvas.height = h;
+            rotateCanvas.style.left = img.offsetLeft + 'px';
+            rotateCanvas.style.top = img.offsetTop + 'px';
+            rotateCanvas.style.width = w + 'px';
+            rotateCanvas.style.height = h + 'px';
+
+            rotateCtx.clearRect(0, 0, rotateCanvas.width, rotateCanvas.height);
+        }
+
+        function drawRotateGuides() {
+            const w = rotateCanvas.width;
+            const h = rotateCanvas.height;
+            rotateCtx.clearRect(0, 0, w, h);
+
+            const cx = w / 2;
+            const cy = h / 2;
+            const armLen = 20;
+
+            rotateCtx.save();
+            rotateCtx.strokeStyle = 'rgba(74, 144, 217, 0.5)';
+            rotateCtx.lineWidth = 1;
+            rotateCtx.setLineDash([4, 4]);
+
+            // Horizontal crosshair
+            rotateCtx.beginPath();
+            rotateCtx.moveTo(cx - armLen, cy);
+            rotateCtx.lineTo(cx + armLen, cy);
+            rotateCtx.stroke();
+
+            // Vertical crosshair
+            rotateCtx.beginPath();
+            rotateCtx.moveTo(cx, cy - armLen);
+            rotateCtx.lineTo(cx, cy + armLen);
+            rotateCtx.stroke();
+
+            rotateCtx.restore();
+        }
+
+        function applyRotatePreview() {
+            resultImage.style.transform = 'rotate(' + rotateAngle + 'deg)';
+        }
+
+        // Drag-to-rotate interaction on canvas
+        function getRotateAngleFromEvent(e) {
+            const rect = rotateCanvas.getBoundingClientRect();
+            const cx = rect.left + rect.width / 2;
+            const cy = rect.top + rect.height / 2;
+            return Math.atan2(e.clientY - cy, e.clientX - cx) * (180 / Math.PI);
+        }
+
+        rotateCanvas.addEventListener('mousedown', (e) => {
+            if (!rotateMode || e.button !== 0) return;
+            e.preventDefault();
+            isRotateDragging = true;
+            rotateDragStartAngle = getRotateAngleFromEvent(e);
+            rotateDragInitialAngle = rotateAngle;
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!rotateMode || !isRotateDragging) return;
+            const currentMouseAngle = getRotateAngleFromEvent(e);
+            let delta = currentMouseAngle - rotateDragStartAngle;
+            // Normalize delta to avoid wrap-around jumps
+            if (delta > 180) delta -= 360;
+            if (delta < -180) delta += 360;
+            let newAngle = rotateDragInitialAngle + delta;
+            // Clamp to -180..180
+            if (newAngle > 180) newAngle -= 360;
+            if (newAngle < -180) newAngle += 360;
+            rotateAngle = Math.round(newAngle * 2) / 2; // snap to 0.5 increments
+            document.getElementById('rotate-angle-slider').value = rotateAngle;
+            document.getElementById('rotate-angle-val').textContent = rotateAngle + '°';
+            applyRotatePreview();
+        });
+
+        window.addEventListener('mouseup', () => {
+            isRotateDragging = false;
+        });
+
+        // Touch events for drag-to-rotate (single-touch only; multi-touch → pinch zoom)
+        rotateCanvas.addEventListener('touchstart', (e) => {
+            if (!rotateMode) return;
+            if (e.touches.length > 1) { isRotateDragging = false; return; }
+            e.preventDefault();
+            isRotateDragging = true;
+            rotateDragStartAngle = getRotateAngleFromEvent(e.touches[0]);
+            rotateDragInitialAngle = rotateAngle;
+        }, { passive: false });
+
+        window.addEventListener('touchmove', (e) => {
+            if (!rotateMode || !isRotateDragging) return;
+            const currentMouseAngle = getRotateAngleFromEvent(e.touches[0]);
+            let delta = currentMouseAngle - rotateDragStartAngle;
+            if (delta > 180) delta -= 360;
+            if (delta < -180) delta += 360;
+            let newAngle = rotateDragInitialAngle + delta;
+            if (newAngle > 180) newAngle -= 360;
+            if (newAngle < -180) newAngle += 360;
+            rotateAngle = Math.round(newAngle * 2) / 2;
+            document.getElementById('rotate-angle-slider').value = rotateAngle;
+            document.getElementById('rotate-angle-val').textContent = rotateAngle + '°';
+            applyRotatePreview();
+        }, { passive: true });
+
+        window.addEventListener('touchend', () => {
+            isRotateDragging = false;
+        });
+
+        async function applyQuickRotate(angle) {
+            if (!currentImageId) return;
+
+            resultLoading.classList.remove('hidden');
+            loadingText.textContent = 'Rotating...';
+
+            try {
+                const res = await fetch('/rotate_image', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        image_id: currentImageId,
+                        angle: angle
+                    })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    resultImage.style.transform = '';
+                    resultImage.src = resultImageUrl(currentImageId);
+                    hasUndo = true;
+                    undoBtn.disabled = false;
+                    // Reset slider since image is now permanently rotated
+                    rotateAngle = 0;
+                    document.getElementById('rotate-angle-slider').value = 0;
+                    document.getElementById('rotate-angle-val').textContent = '0°';
+                } else {
+                    alert(data.error || 'Rotation failed');
+                }
+            } catch (err) {
+                alert('Error: ' + err.message);
+            }
+
+            resultLoading.classList.add('hidden');
+        }
+
+        async function applyRotate() {
+            if (!currentImageId || rotateAngle === 0) {
+                deactivateAfterTool();
+                return;
+            }
+
+            resultImage.style.transform = '';
+            resultLoading.classList.remove('hidden');
+            loadingText.textContent = 'Rotating...';
+
+            try {
+                const res = await fetch('/rotate_image', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        image_id: currentImageId,
+                        angle: rotateAngle
+                    })
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    resultImage.src = resultImageUrl(currentImageId);
+                    hasUndo = true;
+                    undoBtn.disabled = false;
+                } else {
+                    alert(data.error || 'Rotation failed');
+                }
+            } catch (err) {
+                alert('Error: ' + err.message);
+            }
+
+            deactivateAfterTool();
+            resultLoading.classList.add('hidden');
+        }
 
         // ==================== Download ====================
 
@@ -2232,6 +3062,8 @@
             afterToolbar.classList.remove('visible');
             clearProcessedSelection();
             clearBeforeSelection();
+            resetBeforeViewZoom();
+            resetResultViewZoom();
             showCameraArea();
         });
 

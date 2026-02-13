@@ -9,7 +9,7 @@ import logging
 import queue
 from io import BytesIO
 from pathlib import Path
-from PIL import Image
+from PIL import Image, ImageOps
 import cv2
 import numpy as np
 from flask import Flask, render_template, request, jsonify, send_file, Response
@@ -18,8 +18,10 @@ from skimage.measure import label, regionprops
 from scipy.ndimage import gaussian_filter
 import ssl
 import requests
+import urllib3
 from requests.adapters import HTTPAdapter
-from urllib3.util.ssl_ import create_urllib3_context
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Force ONNX Runtime to use CPU only (suppress TensorRT/CUDA warnings)
 os.environ["ORT_TENSORRT_UNAVAILABLE"] = "1"
@@ -86,6 +88,12 @@ if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
 # Cache for current image embedding (avoid re-encoding same image)
 sam_image_cache = {
     'image_id': None,
+    'predictor_ready': False
+}
+
+sam_crop_cache = {
+    'image_id': None,
+    'crop_region': None,
     'predictor_ready': False
 }
 
@@ -204,11 +212,11 @@ def remove_color_segment(img, mask, dilate_pixels=None, feather_pixels=None):
 
         if dilate_pixels is None:
             if ratio < 0.05:
-                dilate_pixels = 2   # Small selection: minimal eat-in
+                dilate_pixels = 3   # Small selection: catch anti-aliased edges
             elif ratio <= 0.25:
-                dilate_pixels = 3   # Medium: balanced
+                dilate_pixels = 4   # Medium: balanced
             else:
-                dilate_pixels = 4   # Large: more dilation for shadow catch
+                dilate_pixels = 5   # Large: more dilation for shadow catch
 
         if feather_pixels is None:
             if ratio < 0.05:
@@ -225,11 +233,20 @@ def remove_color_segment(img, mask, dilate_pixels=None, feather_pixels=None):
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (dilate_pixels * 2 + 1, dilate_pixels * 2 + 1))
         mask = cv2.dilate(mask, kernel, iterations=1)
 
+    # Remember which pixels were already transparent before removal
+    was_transparent = (img_array[:, :, 3] < 10).astype(np.uint8)
+
     # Feather the mask edge for smooth alpha transition
     if feather_pixels > 0:
         # Create a soft falloff at the mask edge using Gaussian blur
         mask_float = mask.astype(np.float32) / 255.0
         mask_blurred = cv2.GaussianBlur(mask_float, (0, 0), sigmaX=feather_pixels)
+        # Clamp feather to a slightly expanded boundary (1px beyond dilated mask)
+        # so the soft falloff catches fringe pixels just outside the SAM mask,
+        # but doesn't spread so far that it makes the garment translucent.
+        fringe_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        feather_boundary = cv2.dilate(mask, fringe_kernel, iterations=1)
+        mask_blurred = np.where(feather_boundary > 0, mask_blurred, 0)
         # The blurred mask creates a gradient at edges (0.0 to 1.0)
         # We want: inside mask = 0 alpha, outside = keep original, edge = gradient
         # So we subtract the blurred mask from the current alpha
@@ -239,6 +256,54 @@ def remove_color_segment(img, mask, dilate_pixels=None, feather_pixels=None):
     else:
         # Hard edge removal
         img_array[:, :, 3] = np.where(mask > 0, 0, img_array[:, :, 3])
+
+    # Defringe: remove semi-transparent pixels near the removal that border
+    # transparent areas.  Feathering is good where the removed object meets
+    # the garment (smooth blend), but bad where it meets already-transparent
+    # background (creates gray outline because the removed object's dark RGB
+    # bleeds through semi-transparent alpha).
+    # Only target pixels in the vicinity of the removal mask so we don't
+    # damage the garment's own anti-aliased edges elsewhere in the image.
+    now_transparent = (img_array[:, :, 3] == 0).astype(np.uint8)
+    any_transparent = np.maximum(was_transparent, now_transparent)
+    defringe_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    near_transparent = cv2.dilate(any_transparent, defringe_kernel, iterations=1)
+    # Limit to pixels near the removal mask (within ~3px of the dilated mask edge)
+    mask_vicinity = cv2.dilate(mask, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)), iterations=1)
+    alpha = img_array[:, :, 3]
+    # Kill all semi-transparent pixels near the removal that border transparency
+    fringe = (alpha > 0) & (alpha < 245) & (near_transparent > 0) & (mask_vicinity > 0)
+    img_array[:, :, 3] = np.where(fringe, 0, alpha)
+
+    # Color decontamination: semi-transparent edge pixels near the removal
+    # still have the removed object's RGB, which shows as gray on white.
+    # Replace their RGB with clean colors from nearby opaque interior pixels.
+    alpha = img_array[:, :, 3]
+    transparent_now = (alpha == 0).astype(np.uint8)
+    edge_detect_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+    near_edge = cv2.dilate(transparent_now, edge_detect_kernel, iterations=1)
+    edge_pixels = (alpha > 0) & (alpha < 255) & (near_edge > 0) & (mask_vicinity > 0)
+
+    if np.any(edge_pixels):
+        # Find opaque interior pixels (not near any transparent area)
+        interior = ((alpha == 255) & (near_edge == 0)).astype(np.float32)
+        if np.any(interior > 0):
+            rgb = img_array[:, :, :3].astype(np.float32)
+            k = 10
+            ksize = (k * 2 + 1, k * 2 + 1)
+            rgb_sum = cv2.GaussianBlur(rgb * interior[:, :, np.newaxis], ksize, sigmaX=k)
+            weight_sum = cv2.GaussianBlur(interior, ksize, sigmaX=k)
+            weight_sum = np.maximum(weight_sum, 1e-6)
+            clean_rgb = np.clip(rgb_sum / weight_sum[:, :, np.newaxis], 0, 255).astype(np.uint8)
+            for c in range(3):
+                img_array[:, :, c] = np.where(edge_pixels, clean_rgb[:, :, c], img_array[:, :, c])
+
+    # Zero out RGB of all fully transparent pixels so LANCZOS resize
+    # can't leak dirty colors into edge interpolation downstream.
+    transparent_final = (img_array[:, :, 3] == 0)
+    img_array[:, :, 0] = np.where(transparent_final, 0, img_array[:, :, 0])
+    img_array[:, :, 1] = np.where(transparent_final, 0, img_array[:, :, 1])
+    img_array[:, :, 2] = np.where(transparent_final, 0, img_array[:, :, 2])
 
     return Image.fromarray(img_array, 'RGBA')
 
@@ -453,18 +518,51 @@ def remove_background_ai(img, model='isnet'):
     # Zero out noise
     alpha = np.where(alpha < 30, 0, alpha).astype(np.uint8)
 
-    # Edge decontamination: the AI model leaves a 2-3px border of
-    # semi-transparent or fully-opaque pixels whose RGB is contaminated
-    # with background color (visible as a grey outline on white BGs).
-    # 1) Erode alpha by 3px to cut into the contaminated edge zone
+    # Edge decontamination: the AI model leaves a border of pixels whose
+    # RGB is contaminated with background color (grey outline on white BGs).
+    # 1) Erode alpha to cut into the contaminated edge zone
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
     alpha = cv2.erode(alpha, kernel, iterations=1)
     # 2) Harden: push low-alpha edge remnants to zero
-    alpha = np.where(alpha < 100, 0, alpha).astype(np.uint8)
+    alpha = np.where(alpha < 180, 0, alpha).astype(np.uint8)
     # 3) Re-soften the new clean edge so it's not jaggy
-    alpha = cv2.GaussianBlur(alpha, (3, 3), sigmaX=0.7)
+    alpha = cv2.GaussianBlur(alpha, (3, 3), sigmaX=0.8)
+    # 4) Final harden pass: kill any remaining low-alpha fringe from the blur
+    alpha = np.where(alpha < 40, 0, alpha).astype(np.uint8)
 
     arr[:, :, 3] = alpha
+
+    # 5) Color decontamination: push clean interior colors into ALL edge
+    # pixels — including fully-opaque ones — since the AI model contaminates
+    # RGB even at alpha=255 near the boundary.
+    # Use only deep-interior pixels (far from any edge) as color source.
+    transparent = (alpha == 0).astype(np.uint8)
+    # Find pixels within 8px of any transparent area (the "edge band")
+    edge_band_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (17, 17))
+    near_edge = cv2.dilate(transparent, edge_band_kernel, iterations=1)
+    # Interior pixels = opaque and NOT near any edge
+    interior_mask = ((alpha >= 250) & (near_edge == 0)).astype(np.float32)
+
+    if np.any(interior_mask > 0):
+        rgb = arr[:, :, :3].astype(np.float32)
+        # Weighted blur: spread interior pixel colors outward with wide radius
+        k = 15
+        ksize = (k * 2 + 1, k * 2 + 1)
+        rgb_sum = cv2.GaussianBlur(rgb * interior_mask[:, :, np.newaxis], ksize, sigmaX=k)
+        weight_sum = cv2.GaussianBlur(interior_mask, ksize, sigmaX=k)
+        weight_sum = np.maximum(weight_sum, 1e-6)
+        clean_rgb = np.clip(rgb_sum / weight_sum[:, :, np.newaxis], 0, 255).astype(np.uint8)
+        # Replace RGB for ALL pixels in the edge band (opaque or not)
+        edge_zone = (alpha > 0) & (near_edge > 0)
+        for c in range(3):
+            arr[:, :, c] = np.where(edge_zone, clean_rgb[:, :, c], arr[:, :, c])
+
+    # 6) Zero out RGB of fully transparent pixels so downstream LANCZOS
+    # resizing can't leak dirty background colors into edge interpolation.
+    transparent_mask = (arr[:, :, 3] == 0)
+    arr[:, :, 0] = np.where(transparent_mask, 0, arr[:, :, 0])
+    arr[:, :, 1] = np.where(transparent_mask, 0, arr[:, :, 1])
+    arr[:, :, 2] = np.where(transparent_mask, 0, arr[:, :, 2])
 
     return Image.fromarray(arr, 'RGBA')
 
@@ -1071,7 +1169,25 @@ def fit_subject_to_square(img, target_size=2048, zoom=100, max_scale=None):
     new_h = max(1, int(subj_h * scale))
 
     if scale != 1.0:
-        subject_scaled = subject.resize((new_w, new_h), Image.LANCZOS)
+        # Premultiplied alpha resize: prevents dark fringe from LANCZOS
+        # interpolating edge pixels with transparent neighbors' dirty RGB.
+        subj_arr = np.array(subject).astype(np.float32)
+        alpha_f = subj_arr[:, :, 3:4] / 255.0
+        # Zero RGB of fully transparent pixels first
+        has_alpha = (subj_arr[:, :, 3:4] > 0).astype(np.float32)
+        subj_arr[:, :, :3] *= has_alpha
+        # Premultiply RGB by alpha
+        subj_arr[:, :, :3] *= alpha_f
+        premult = Image.fromarray(subj_arr.astype(np.uint8), 'RGBA')
+        premult_scaled = premult.resize((new_w, new_h), Image.LANCZOS)
+        # Un-premultiply
+        out_arr = np.array(premult_scaled).astype(np.float32)
+        out_alpha = out_arr[:, :, 3:4]
+        safe_alpha = np.maximum(out_alpha, 1.0) / 255.0
+        out_arr[:, :, :3] = np.clip(out_arr[:, :, :3] / safe_alpha, 0, 255)
+        # Zero RGB where alpha is 0
+        out_arr[:, :, :3] = np.where(out_alpha > 0, out_arr[:, :, :3], 0)
+        subject_scaled = Image.fromarray(out_arr.astype(np.uint8), 'RGBA')
     else:
         subject_scaled = subject
     subject_data = np.array(subject_scaled)
@@ -1176,19 +1292,42 @@ def add_watermark(img, watermark_scale=0.075, watermark_opacity=0.3, watermark_m
     return img
 
 
-def prepare_ecommerce_image(img, watermark_scale=0.075, watermark_opacity=0.3, watermark_margin=15):
+def prepare_ecommerce_image(img, watermark_scale=0.075, watermark_opacity=0.3, watermark_margin=15, image_id=None):
     """Prepare image for e-commerce: white background, watermark."""
 
     img_data = np.array(img)
     h, w = img_data.shape[:2]
 
-    # Auto-brighten subject for white background
-    img_data = auto_brighten_for_white_bg(img_data)
+    # Decide whether to brighten: use the output alpha to identify actual background
+    # pixels in the original photo. If the original background was already light,
+    # skip brightening to preserve true subject colors.
+    skip_brighten = False
+    if image_id is not None:
+        try:
+            orig_path = os.path.join(app.config['UPLOAD_FOLDER'], f'{image_id}_original.png')
+            output_path = os.path.join(app.config['OUTPUT_FOLDER'], f'{image_id}_output.png')
+            if os.path.exists(orig_path) and os.path.exists(output_path):
+                orig_arr = np.array(Image.open(orig_path).convert('RGB'), dtype=np.float32)
+                out_alpha = np.array(Image.open(output_path))[:, :, 3]
+                bg_mask = out_alpha < 40
+                if np.any(bg_mask):
+                    bg_lum = 0.299 * orig_arr[bg_mask, 0] + 0.587 * orig_arr[bg_mask, 1] + 0.114 * orig_arr[bg_mask, 2]
+                    if float(np.median(bg_lum)) >= 170:
+                        skip_brighten = True
+        except Exception:
+            pass
+
+    if not skip_brighten:
+        img_data = auto_brighten_for_white_bg(img_data)
+
+    # Kill any low-alpha pixels — they're nearly invisible but contribute
+    # a faint gray when composited on white.
+    img_data[:, :, 3] = np.where(img_data[:, :, 3] < 40, 0, img_data[:, :, 3])
 
     # Start with white background
     result = np.full((h, w, 3), 255, dtype=np.uint8)
 
-    # Composite on white - SAM refinement already cleaned up the edges
+    # Composite on white
     alpha = img_data[:, :, 3].astype(float) / 255.0
     for c in range(3):
         result[:, :, c] = (img_data[:, :, c] * alpha + result[:, :, c] * (1 - alpha)).astype(np.uint8)
@@ -1228,6 +1367,8 @@ def upload():
         # Read and process image
         step_start = time.time()
         img = Image.open(file.stream)
+        # Apply EXIF orientation so JPEGs from phones display upright
+        img = ImageOps.exif_transpose(img)
         if img.mode == 'RGBA':
             # Convert RGBA to RGB with white background for processing
             background = Image.new('RGB', img.size, (255, 255, 255))
@@ -1383,6 +1524,16 @@ def adjust():
         # Save adjusted image
         img.save(adjusted_path, 'PNG')
 
+        # Invalidate SAM caches since image changed
+        global sam_image_cache, sam_crop_cache
+        if sam_image_cache.get('image_id') == image_id:
+            sam_image_cache['image_id'] = None
+            sam_image_cache['predictor_ready'] = False
+        if sam_crop_cache.get('image_id') == image_id:
+            sam_crop_cache['image_id'] = None
+            sam_crop_cache['crop_region'] = None
+            sam_crop_cache['predictor_ready'] = False
+
         return jsonify({
             'success': True,
             'image_id': image_id
@@ -1478,16 +1629,154 @@ def undo():
         shutil.copy2(undo_path, adjusted_path)
         os.remove(undo_path)
 
-        # Invalidate SAM cache since image changed
-        global sam_image_cache
+        # Invalidate SAM caches since image changed
+        global sam_image_cache, sam_crop_cache
         if sam_image_cache.get('image_id') == image_id:
             sam_image_cache['image_id'] = None
             sam_image_cache['predictor_ready'] = False
+        if sam_crop_cache.get('image_id') == image_id:
+            sam_crop_cache['image_id'] = None
+            sam_crop_cache['crop_region'] = None
+            sam_crop_cache['predictor_ready'] = False
 
         return jsonify({
             'success': True,
             'image_id': image_id
         })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/crop_to_shape', methods=['POST'])
+def crop_to_shape():
+    """Crop image to a rectangle or circle shape — everything outside becomes transparent."""
+    data = request.json
+    image_id = data.get('image_id')
+    crop = data.get('crop', {})
+    zoom = data.get('zoom', 100)
+
+    if not image_id:
+        return jsonify({'error': 'No image ID provided'}), 400
+
+    shape = crop.get('shape', 'rectangle')
+
+    try:
+        save_undo_backup(image_id)
+
+        # Load adjusted (or output) image
+        adjusted_path = os.path.join(app.config['OUTPUT_FOLDER'], f'{image_id}_adjusted.png')
+        output_path = os.path.join(app.config['OUTPUT_FOLDER'], f'{image_id}_output.png')
+        src_path = adjusted_path if os.path.exists(adjusted_path) else output_path
+
+        img = Image.open(src_path).convert('RGBA')
+        img_array = np.array(img)
+        h, w = img_array.shape[:2]
+
+        # Map coords from 2048 display space to image space
+        sq = get_square_transform(img, 2048, zoom, max_scale=2.0)
+        if sq is None:
+            return jsonify({'error': 'No visible subject found'}), 400
+
+        # Build a mask: 255 = outside (remove), 0 = inside (keep)
+        mask = np.full((h, w), 255, dtype=np.uint8)
+
+        if shape == 'rectangle':
+            # Transform display coords to image coords
+            dx1 = crop.get('x1', 0)
+            dy1 = crop.get('y1', 0)
+            dx2 = crop.get('x2', 0)
+            dy2 = crop.get('y2', 0)
+
+            # Display coord -> image coord:  img_coord = (display_coord - paste) / scale + bbox_min
+            ix1 = int((dx1 - sq['paste_x']) / sq['scale'] + sq['x_min'])
+            iy1 = int((dy1 - sq['paste_y']) / sq['scale'] + sq['y_min'])
+            ix2 = int((dx2 - sq['paste_x']) / sq['scale'] + sq['x_min'])
+            iy2 = int((dy2 - sq['paste_y']) / sq['scale'] + sq['y_min'])
+
+            # Clamp to image bounds
+            ix1 = max(0, min(w, ix1))
+            ix2 = max(0, min(w, ix2))
+            iy1 = max(0, min(h, iy1))
+            iy2 = max(0, min(h, iy2))
+
+            mask[iy1:iy2, ix1:ix2] = 0
+
+        elif shape == 'circle':
+            dcx = crop.get('cx', 0)
+            dcy = crop.get('cy', 0)
+            dr = crop.get('radius', 0)
+
+            # Transform center and radius to image space
+            icx = (dcx - sq['paste_x']) / sq['scale'] + sq['x_min']
+            icy = (dcy - sq['paste_y']) / sq['scale'] + sq['y_min']
+            ir = dr / sq['scale']
+
+            yy, xx = np.ogrid[:h, :w]
+            dist_sq = (xx - icx) ** 2 + (yy - icy) ** 2
+            mask[dist_sq <= ir ** 2] = 0
+
+        # Apply: zero alpha outside the shape
+        img_array[:, :, 3] = np.where(mask == 255, 0, img_array[:, :, 3])
+
+        result = Image.fromarray(img_array)
+        result.save(adjusted_path)
+
+        # Invalidate SAM caches
+        global sam_image_cache, sam_crop_cache
+        if sam_image_cache.get('image_id') == image_id:
+            sam_image_cache['image_id'] = None
+            sam_image_cache['predictor_ready'] = False
+        if sam_crop_cache.get('image_id') == image_id:
+            sam_crop_cache['image_id'] = None
+            sam_crop_cache['crop_region'] = None
+            sam_crop_cache['predictor_ready'] = False
+
+        return jsonify({'success': True})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/rotate_image', methods=['POST'])
+def rotate_image():
+    """Rotate image by a given angle (CW-positive from UI)."""
+    data = request.json
+    image_id = data.get('image_id')
+    angle = data.get('angle', 0)
+
+    if not image_id:
+        return jsonify({'error': 'No image ID provided'}), 400
+
+    if angle == 0:
+        return jsonify({'success': True})
+
+    try:
+        save_undo_backup(image_id)
+
+        # Load adjusted (or output) image
+        adjusted_path = os.path.join(app.config['OUTPUT_FOLDER'], f'{image_id}_adjusted.png')
+        output_path = os.path.join(app.config['OUTPUT_FOLDER'], f'{image_id}_output.png')
+        src_path = adjusted_path if os.path.exists(adjusted_path) else output_path
+
+        img = Image.open(src_path).convert('RGBA')
+
+        # PIL rotate() uses CCW-positive, UI uses CW-positive, so negate
+        rotated = img.rotate(-angle, expand=True, resample=Image.BICUBIC)
+
+        rotated.save(adjusted_path)
+
+        # Invalidate SAM caches
+        global sam_image_cache, sam_crop_cache
+        if sam_image_cache.get('image_id') == image_id:
+            sam_image_cache['image_id'] = None
+            sam_image_cache['predictor_ready'] = False
+        if sam_crop_cache.get('image_id') == image_id:
+            sam_crop_cache['image_id'] = None
+            sam_crop_cache['crop_region'] = None
+            sam_crop_cache['predictor_ready'] = False
+
+        return jsonify({'success': True})
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1745,7 +2034,7 @@ def get_image(image_type, image_id):
         img = Image.open(path)
         if img.mode == 'RGBA':
             img = apply_drop_shadow(img, 2)
-            img = prepare_ecommerce_image(img)
+            img = prepare_ecommerce_image(img, image_id=image_id)
         buffer = BytesIO()
         img.save(buffer, 'PNG')
         buffer.seek(0)
@@ -1762,7 +2051,7 @@ def get_image(image_type, image_id):
         if img.mode == 'RGBA':
             img = fit_subject_to_square(img, 2048, zoom, max_scale=2.0)
             img = apply_drop_shadow(img, 2)
-            img = prepare_ecommerce_image(img)
+            img = prepare_ecommerce_image(img, image_id=image_id)
         buffer = BytesIO()
         img.save(buffer, 'PNG')
         buffer.seek(0)
@@ -1779,7 +2068,7 @@ def get_image(image_type, image_id):
             # RGBA means BG was removed — fall through to normal pipeline
             img = fit_subject_to_square(img, 2048, int(request.args.get('zoom', 100)), max_scale=2.0)
             img = apply_drop_shadow(img, 2)
-            img = prepare_ecommerce_image(img)
+            img = prepare_ecommerce_image(img, image_id=image_id)
         buffer = BytesIO()
         img.save(buffer, 'PNG')
         buffer.seek(0)
@@ -1826,7 +2115,7 @@ def download(image_id):
         if img.mode == 'RGBA':
             img = fit_subject_to_square(img, 2048, zoom)
             img = apply_drop_shadow(img, 2)
-            img = prepare_ecommerce_image(img)
+            img = prepare_ecommerce_image(img, image_id=image_id)
 
         buffer = BytesIO()
         img.save(buffer, 'PNG')
@@ -1852,7 +2141,7 @@ def download(image_id):
 @app.route('/select_color', methods=['POST'])
 def select_color():
     """Select a segment at the clicked point using MobileSAM. Accumulates with previous selections."""
-    global sam_image_cache
+    global sam_image_cache, sam_crop_cache
 
     data = request.json
     image_id = data.get('image_id')
@@ -1896,8 +2185,26 @@ def select_color():
             click_x = (click_x - sq_transform['paste_x']) / sq_transform['scale'] + sq_transform['x_min']
             click_y = (click_y - sq_transform['paste_y']) / sq_transform['scale'] + sq_transform['y_min']
 
-        # For SAM, use original image (better segmentation on full detail)
-        if os.path.exists(original_path):
+        # For SAM image source: when an adjusted image exists the geometry
+        # may have changed (rotation, crop) so coordinates only make sense
+        # against the adjusted image.  Fall back to original for better
+        # segmentation quality when no transforms have been applied.
+        sam_alpha_mask = None  # will hold alpha channel to mask out transparent areas
+        sam_rgba_path = None
+        if os.path.exists(adjusted_path):
+            sam_rgba_path = adjusted_path
+        elif os.path.exists(output_path):
+            sam_rgba_path = output_path
+
+        if sam_rgba_path:
+            sam_rgba = Image.open(sam_rgba_path).convert('RGBA')
+            # Composite onto white so transparent areas become uniform white
+            # instead of black (prevents SAM from segmenting removed background)
+            white_bg = Image.new('RGBA', sam_rgba.size, (255, 255, 255, 255))
+            sam_img = Image.alpha_composite(white_bg, sam_rgba).convert('RGB')
+            # Keep alpha mask to exclude already-transparent pixels from selection
+            sam_alpha_mask = np.array(sam_rgba)[:, :, 3]
+        elif os.path.exists(original_path):
             sam_img = Image.open(original_path).convert('RGB')
         else:
             sam_img = display_img.convert('RGB')
@@ -1911,17 +2218,58 @@ def select_color():
         sam_click_x = int(click_x * scale_x)
         sam_click_y = int(click_y * scale_y)
 
-        # Set image in SAM predictor (cache to avoid re-encoding)
-        if sam_image_cache['image_id'] != image_id:
-            sam_predictor.set_image(sam_array)
-            sam_image_cache['image_id'] = image_id
-            sam_image_cache['predictor_ready'] = True
+        # Set image in SAM predictor with crop-and-predict for detail mode
+        used_crop = False
+        crop_x0 = crop_y0 = 0
+
+        if select_mode == 'detail':
+            # Crop-and-Predict: extract a region around the click for higher effective resolution.
+            # MobileSAM resizes to 1024px, so a smaller crop = more pixels per detail.
+            crop_size = 1024
+            pad = 256
+            half = (crop_size + 2 * pad) // 2  # 768
+
+            crop_x0 = max(0, sam_click_x - half)
+            crop_y0 = max(0, sam_click_y - half)
+            crop_x1 = min(sam_w, sam_click_x + half)
+            crop_y1 = min(sam_h, sam_click_y + half)
+            # Adjust start if we hit the right/bottom edge
+            crop_x0 = max(0, crop_x1 - (crop_size + 2 * pad))
+            crop_y0 = max(0, crop_y1 - (crop_size + 2 * pad))
+
+            crop_region = (crop_x0, crop_y0, crop_x1, crop_y1)
+            crop_array = sam_array[crop_y0:crop_y1, crop_x0:crop_x1]
+
+            # Use crop cache to avoid re-encoding if clicking in the same region
+            if (sam_crop_cache['image_id'] != image_id or
+                    sam_crop_cache['crop_region'] != crop_region):
+                sam_predictor.set_image(crop_array)
+                sam_crop_cache['image_id'] = image_id
+                sam_crop_cache['crop_region'] = crop_region
+                sam_crop_cache['predictor_ready'] = True
+                # Full-image cache is now stale (predictor holds crop embedding)
+                sam_image_cache['predictor_ready'] = False
+
+            # Adjust click coords to crop-local space
+            local_click_x = sam_click_x - crop_x0
+            local_click_y = sam_click_y - crop_y0
+            point_coords = np.array([[local_click_x, local_click_y]])
+            used_crop = True
+        else:
+            # Broad mode: use full image with cache
+            if sam_image_cache['image_id'] != image_id or not sam_image_cache['predictor_ready']:
+                sam_predictor.set_image(sam_array)
+                sam_image_cache['image_id'] = image_id
+                sam_image_cache['predictor_ready'] = True
+                # Crop cache is now stale
+                sam_crop_cache['predictor_ready'] = False
+
+            point_coords = np.array([[sam_click_x, sam_click_y]])
 
         # Predict segment at click point
-        point_coords = np.array([[sam_click_x, sam_click_y]])
         point_labels = np.array([1])  # 1 = foreground point
 
-        masks, scores, _ = sam_predictor.predict(
+        masks, scores, low_res_masks = sam_predictor.predict(
             point_coords=point_coords,
             point_labels=point_labels,
             multimask_output=True
@@ -1930,29 +2278,53 @@ def select_color():
         # SAM returns 3 masks at different granularities (small, medium, large).
         if select_mode == 'detail':
             # Detail mode: pick the smallest valid mask that contains the click point.
-            # Ideal for small regions like gaps between arms.
+            local_cy = local_click_y if used_crop else sam_click_y
+            local_cx = local_click_x if used_crop else sam_click_x
             best_idx = None
             best_area = float('inf')
             for i in range(len(masks)):
                 m = masks[i]
-                if sam_click_y < m.shape[0] and sam_click_x < m.shape[1] and m[sam_click_y, sam_click_x]:
+                if local_cy < m.shape[0] and local_cx < m.shape[1] and m[local_cy, local_cx]:
                     area = np.sum(m)
                     if area < best_area and area > 0:
                         best_area = area
                         best_idx = i
-            # Fallback to highest score if no mask contains the click point
             if best_idx is None:
                 best_idx = np.argmax(scores)
         else:
             # Broad mode (default): pick the highest-scored mask.
-            # Best for selecting large regions like full background or big objects.
             best_idx = np.argmax(scores)
 
-        new_mask = (masks[best_idx] * 255).astype(np.uint8)
+        # Iterative refinement: feed best mask logits back for sharper edges
+        masks_refined, _, _ = sam_predictor.predict(
+            point_coords=point_coords,
+            point_labels=point_labels,
+            mask_input=low_res_masks[best_idx:best_idx+1],
+            multimask_output=False
+        )
+        new_mask = (masks_refined[0] * 255).astype(np.uint8)
+
+        # Expand the SAM mask by ~1.5px so the selection covers edge pixels
+        expand_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        new_mask = cv2.dilate(new_mask, expand_kernel, iterations=1)
+
+        # If detail mode used crop, paste mask back into full-size coordinates
+        if used_crop:
+            full_mask = np.zeros((sam_h, sam_w), dtype=np.uint8)
+            full_mask[crop_y0:crop_y0 + new_mask.shape[0], crop_x0:crop_x0 + new_mask.shape[1]] = new_mask
+            new_mask = full_mask
 
         # Resize mask to match display image size if needed
         if (sam_w, sam_h) != display_size:
             new_mask = cv2.resize(new_mask, display_size, interpolation=cv2.INTER_NEAREST)
+
+        # Exclude already-transparent pixels from the selection so SAM
+        # can't select background that was previously removed
+        if sam_alpha_mask is not None:
+            alpha_resized = sam_alpha_mask
+            if (sam_alpha_mask.shape[1], sam_alpha_mask.shape[0]) != display_size:
+                alpha_resized = cv2.resize(sam_alpha_mask, display_size, interpolation=cv2.INTER_NEAREST)
+            new_mask = np.where(alpha_resized > 10, new_mask, 0).astype(np.uint8)
 
         if new_mask is None or np.sum(new_mask > 0) == 0:
             return jsonify({'success': False, 'message': 'No segment found at click point'})
@@ -2041,14 +2413,21 @@ def remove_selection():
         # Remove the selected segment
         result = remove_color_segment(img, mask)
 
-        # Smooth jaggies from the binary mask edge
-        result = apply_edge_smoothing(result, level=1)
-
         # Save the adjusted image
         result.save(adjusted_path, 'PNG')
 
         # Delete the selection mask
         os.remove(mask_path)
+
+        # Invalidate SAM caches since image changed
+        global sam_image_cache, sam_crop_cache
+        if sam_image_cache.get('image_id') == image_id:
+            sam_image_cache['image_id'] = None
+            sam_image_cache['predictor_ready'] = False
+        if sam_crop_cache.get('image_id') == image_id:
+            sam_crop_cache['image_id'] = None
+            sam_crop_cache['crop_region'] = None
+            sam_crop_cache['predictor_ready'] = False
 
         return jsonify({
             'success': True,
@@ -2141,6 +2520,7 @@ def add_selection():
         if feather_pixels > 0:
             mask_float = mask.astype(np.float32) / 255.0
             mask_blurred = cv2.GaussianBlur(mask_float, (0, 0), sigmaX=feather_pixels)
+            mask_blurred = np.where(mask > 0, mask_blurred, 0)
         else:
             mask_blurred = (mask > 0).astype(np.float32)
 
@@ -2164,6 +2544,16 @@ def add_selection():
 
         # Delete the selection mask
         os.remove(mask_path)
+
+        # Invalidate SAM caches since image changed
+        global sam_image_cache, sam_crop_cache
+        if sam_image_cache.get('image_id') == image_id:
+            sam_image_cache['image_id'] = None
+            sam_image_cache['predictor_ready'] = False
+        if sam_crop_cache.get('image_id') == image_id:
+            sam_crop_cache['image_id'] = None
+            sam_crop_cache['crop_region'] = None
+            sam_crop_cache['predictor_ready'] = False
 
         return jsonify({
             'success': True,
@@ -2233,6 +2623,7 @@ def keep_only_selection():
             if feather_pixels > 0:
                 mask_float = mask.astype(np.float32) / 255.0
                 mask_blurred = cv2.GaussianBlur(mask_float, (0, 0), sigmaX=feather_pixels)
+                mask_blurred = np.where(mask > 0, mask_blurred, 0)
             else:
                 mask_blurred = (mask > 0).astype(np.float32)
 
@@ -2271,6 +2662,7 @@ def keep_only_selection():
             if feather_pixels > 0:
                 mask_float = mask.astype(np.float32) / 255.0
                 mask_blurred = cv2.GaussianBlur(mask_float, (0, 0), sigmaX=feather_pixels)
+                mask_blurred = np.where(mask > 0, mask_blurred, 0)
             else:
                 mask_blurred = (mask > 0).astype(np.float32)
 
@@ -2724,8 +3116,19 @@ def apply_subject_zoom(img, zoom_percent):
     new_width = int(width * scale)
     new_height = int(height * scale)
 
-    # Scale up the image
-    scaled = img.resize((new_width, new_height), Image.LANCZOS)
+    # Premultiplied alpha resize to prevent dark fringe from LANCZOS
+    img_arr = np.array(img).astype(np.float32)
+    alpha_f = img_arr[:, :, 3:4] / 255.0
+    img_arr[:, :, :3] *= (img_arr[:, :, 3:4] > 0).astype(np.float32)
+    img_arr[:, :, :3] *= alpha_f
+    premult = Image.fromarray(img_arr.astype(np.uint8), 'RGBA')
+    premult_scaled = premult.resize((new_width, new_height), Image.LANCZOS)
+    out_arr = np.array(premult_scaled).astype(np.float32)
+    out_alpha = out_arr[:, :, 3:4]
+    safe_alpha = np.maximum(out_alpha, 1.0) / 255.0
+    out_arr[:, :, :3] = np.clip(out_arr[:, :, :3] / safe_alpha, 0, 255)
+    out_arr[:, :, :3] = np.where(out_alpha > 0, out_arr[:, :, :3], 0)
+    scaled = Image.fromarray(out_arr.astype(np.uint8), 'RGBA')
 
     # Create new canvas at original size
     result = Image.new('RGBA', (width, height), (255, 255, 255, 0))
@@ -2941,11 +3344,11 @@ def apply_drop_shadow(img, level):
     blur_radius = params['blur']
     opacity = params['opacity']
 
-    # Erode alpha so shadow starts away from the subject edge (prevents grey halo)
+    # Erode alpha so shadow starts well away from the subject edge
     alpha = img.split()[3]
     alpha_arr = np.array(alpha)
     erode_kernel = np.ones((3, 3), np.uint8)
-    alpha_eroded = cv2.erode(alpha_arr, erode_kernel, iterations=2)
+    alpha_eroded = cv2.erode(alpha_arr, erode_kernel, iterations=4)
     shadow_alpha = Image.fromarray(alpha_eroded)
 
     # Build canvas large enough for shadow in any direction + blur padding
@@ -2973,6 +3376,15 @@ def apply_drop_shadow(img, level):
 
     # Crop shadow back to original image bounds
     shadow_cropped = shadow.crop((img_x, img_y, img_x + width, img_y + height))
+
+    # Mask shadow so it only shows where the subject is fully transparent.
+    # This prevents the shadow from darkening semi-transparent edge pixels,
+    # which would create a visible gray outline on white backgrounds.
+    subj_alpha = np.array(img.split()[3]).astype(np.float32) / 255.0
+    shadow_arr = np.array(shadow_cropped)
+    shadow_arr[:, :, 3] = (shadow_arr[:, :, 3].astype(np.float32) * (1.0 - subj_alpha)).astype(np.uint8)
+    shadow_cropped = Image.fromarray(shadow_arr, 'RGBA')
+
     result = Image.alpha_composite(result, shadow_cropped)
 
     # Paste original image on top
@@ -3065,6 +3477,7 @@ def gopro_stream_snapshot():
         # Read and process image
         step_start = time.time()
         img = Image.open(snapshot_path)
+        img = ImageOps.exif_transpose(img)
         print(f"Stream snapshot captured: {img.size[0]}x{img.size[1]}")
         if img.mode == 'RGBA':
             background = Image.new('RGB', img.size, (255, 255, 255))
@@ -3223,6 +3636,7 @@ def gopro_capture():
         # Read and process image (same as upload flow)
         step_start = time.time()
         img = Image.open(local_path)
+        img = ImageOps.exif_transpose(img)
         if used_preview:
             print(f"Using preview image: {img.size[0]}x{img.size[1]}")
         else:
